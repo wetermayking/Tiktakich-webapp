@@ -47,7 +47,7 @@
       flex-direction: column;
       align-items: center;
       gap: 8px;
-      background: linear-gradient(to bottom, rgba(0,0,0,0.78), transparent);
+      background: linear-gradient(to bottom, rgba(0,0,0,0.8), transparent);
       pointer-events: none;
     }
 
@@ -76,10 +76,10 @@
     .sound-toggle-pill {
       font-size: 11px;
       font-weight: 700;
-      padding: 5px 10px;
+      padding: 5px 11px;
       border-radius: 999px;
-      background: rgba(24, 24, 27, 0.88);
-      border: 1px solid rgba(255, 255, 255, 0.18);
+      background: rgba(24, 24, 27, 0.9);
+      border: 1px solid rgba(255, 255, 255, 0.22);
       color: #fff;
       cursor: pointer;
     }
@@ -159,9 +159,10 @@
       align-items: center;
       overflow: hidden;
       user-select: none;
+      cursor: pointer;
     }
 
-    .video-bg-canvas, .video-media {
+    .video-media {
       position: absolute;
       inset: 0;
       width: 100%;
@@ -170,18 +171,52 @@
       z-index: 1;
     }
 
+    .video-vignette {
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(to top, rgba(0,0,0,0.72) 0%, transparent 32%, transparent 72%, rgba(0,0,0,0.45) 100%);
+      z-index: 2;
+      pointer-events: none;
+    }
+
+    .pause-indicator {
+      position: absolute;
+      z-index: 15;
+      width: 72px;
+      height: 72px;
+      border-radius: 50%;
+      background: rgba(0, 0, 0, 0.55);
+      backdrop-filter: blur(6px);
+      border: 1px solid rgba(255,255,255,0.2);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      font-size: 30px;
+      pointer-events: none;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.45);
+    }
+
+    .video-card.paused .pause-indicator {
+      display: flex;
+    }
+
     .meme-overlay {
       position: relative;
       z-index: 5;
-      padding: 24px;
+      padding: 20px;
       text-align: center;
       max-width: 85%;
       pointer-events: none;
     }
 
+    .meme-overlay.has-video {
+      align-self: flex-start;
+      margin-top: 96px;
+    }
+
     .meme-emoji {
-      font-size: 64px;
-      margin-bottom: 14px;
+      font-size: 58px;
+      margin-bottom: 12px;
       display: block;
       filter: drop-shadow(0 6px 16px rgba(0,0,0,0.5));
       animation: bounce 2.2s infinite ease-in-out;
@@ -189,45 +224,34 @@
 
     @keyframes bounce {
       0%, 100% { transform: translateY(0) scale(1); }
-      50% { transform: translateY(-10px) scale(1.06); }
+      50% { transform: translateY(-8px) scale(1.05); }
     }
 
     .meme-title {
-      font-size: 24px;
+      font-size: 22px;
       font-weight: 900;
       line-height: 1.25;
       text-shadow: 0 2px 12px rgba(0,0,0,0.85), 0 0 2px #000;
-      background: rgba(0,0,0,0.35);
-      padding: 12px 16px;
-      border-radius: 16px;
+      background: rgba(0,0,0,0.38);
+      padding: 10px 15px;
+      border-radius: 14px;
       backdrop-filter: blur(4px);
-    }
-
-    .sound-badge {
-      display: inline-block;
-      margin-top: 10px;
-      font-size: 11px;
-      font-weight: 700;
-      padding: 4px 10px;
-      border-radius: 999px;
-      background: rgba(0,0,0,0.55);
-      border: 1px solid rgba(255,255,255,0.2);
     }
 
     .actions-col {
       position: absolute;
       right: 12px;
-      bottom: 86px;
+      bottom: 84px;
       z-index: 20;
       display: flex;
       flex-direction: column;
       align-items: center;
-      gap: 18px;
+      gap: 16px;
     }
 
     .avatar-wrap {
       position: relative;
-      margin-bottom: 6px;
+      margin-bottom: 4px;
       cursor: pointer;
     }
 
@@ -282,12 +306,12 @@
       width: 42px;
       height: 42px;
       border-radius: 50%;
-      background: rgba(0,0,0,0.4);
+      background: rgba(0,0,0,0.45);
       backdrop-filter: blur(6px);
       display: flex;
       align-items: center;
       justify-content: center;
-      font-size: 22px;
+      font-size: 20px;
       transition: transform 0.15s;
     }
 
@@ -299,10 +323,15 @@
       color: #fe2c55;
     }
 
+    .action-btn.delete-btn .action-icon {
+      background: rgba(239, 68, 68, 0.25);
+      border: 1px solid rgba(239, 68, 68, 0.5);
+    }
+
     .action-count {
-      font-size: 12px;
+      font-size: 11px;
       font-weight: 600;
-      text-shadow: 0 1px 4px rgba(0,0,0,0.8);
+      text-shadow: 0 1px 4px rgba(0,0,0,0.85);
     }
 
     .video-meta {
@@ -313,20 +342,39 @@
       z-index: 20;
       display: flex;
       flex-direction: column;
-      gap: 6px;
+      gap: 5px;
       text-shadow: 0 1px 4px rgba(0,0,0,0.9);
+    }
+
+    .meta-badges {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      align-items: center;
     }
 
     .real-badge {
       display: inline-flex;
       align-items: center;
       gap: 5px;
-      width: fit-content;
       background: rgba(34, 197, 94, 0.25);
       border: 1px solid rgba(34, 197, 94, 0.6);
       color: #86efac;
       font-size: 11px;
       font-weight: 700;
+      padding: 2px 8px;
+      border-radius: 999px;
+    }
+
+    .audio-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      background: rgba(24, 24, 27, 0.72);
+      border: 1px solid rgba(255, 255, 255, 0.18);
+      color: #e4e4e7;
+      font-size: 11px;
+      font-weight: 600;
       padding: 2px 8px;
       border-radius: 999px;
     }
@@ -414,18 +462,178 @@
       justify-content: center;
     }
 
+    /* Улучшенный дизайн студии и экранов */
     .page-scroll {
       flex: 1;
       overflow-y: auto;
-      padding: 64px 16px 84px;
+      padding: 20px 16px 88px;
+    }
+
+    .studio-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 14px;
+    }
+
+    .studio-header h2 {
+      font-size: 20px;
+      font-weight: 900;
+    }
+
+    .studio-preview {
+      width: 100%;
+      height: 210px;
+      border-radius: 18px;
+      background: linear-gradient(135deg, #18181b, #27272a);
+      border: 1px solid #3f3f46;
+      position: relative;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      margin-bottom: 14px;
+      text-align: center;
+      padding: 16px;
+    }
+
+    .studio-preview video, .studio-preview img {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      opacity: 0.85;
+    }
+
+    .studio-preview-content {
+      position: relative;
+      z-index: 3;
+      pointer-events: none;
+      text-shadow: 0 2px 10px rgba(0,0,0,0.9);
     }
 
     .card-box {
-      background: #18181b;
+      background: #141417;
       border: 1px solid #27272a;
-      border-radius: 16px;
+      border-radius: 18px;
       padding: 16px;
       margin-bottom: 14px;
+    }
+
+    .section-title {
+      font-size: 13px;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: #a1a1aa;
+      margin-bottom: 12px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .file-drop-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      margin-bottom: 12px;
+    }
+
+    .file-tile {
+      background: #09090b;
+      border: 1px dashed #3f3f46;
+      border-radius: 14px;
+      padding: 12px 10px;
+      text-align: center;
+      cursor: pointer;
+      transition: 0.2s;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .file-tile.selected {
+      border-style: solid;
+      border-color: #22c55e;
+      background: rgba(34, 197, 94, 0.08);
+    }
+
+    .file-tile input[type="file"] {
+      display: none;
+    }
+
+    .file-tile-ico {
+      font-size: 22px;
+    }
+
+    .file-tile-label {
+      font-size: 12px;
+      font-weight: 700;
+      color: #e4e4e7;
+    }
+
+    .file-tile-sub {
+      font-size: 10px;
+      color: #71717a;
+      max-width: 100%;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .segmented-control {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 6px;
+      background: #09090b;
+      padding: 4px;
+      border-radius: 12px;
+      border: 1px solid #27272a;
+      margin-bottom: 12px;
+    }
+
+    .seg-btn {
+      background: none;
+      border: none;
+      color: #a1a1aa;
+      font-size: 11px;
+      font-weight: 700;
+      padding: 9px 6px;
+      border-radius: 9px;
+      cursor: pointer;
+      transition: 0.15s;
+    }
+
+    .seg-btn.active {
+      background: #27272a;
+      color: #fff;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.4);
+    }
+
+    .slider-group {
+      background: #09090b;
+      border: 1px solid #27272a;
+      border-radius: 12px;
+      padding: 10px 12px;
+      margin-bottom: 10px;
+    }
+
+    .slider-header {
+      display: flex;
+      justify-content: space-between;
+      font-size: 12px;
+      font-weight: 700;
+      margin-bottom: 6px;
+      color: #e4e4e7;
+    }
+
+    input[type="range"] {
+      width: 100%;
+      accent-color: #fe2c55;
+      cursor: pointer;
     }
 
     .input-field, .select-field, .textarea-field {
@@ -434,7 +642,7 @@
       border: 1px solid #3f3f46;
       color: #fff;
       border-radius: 12px;
-      padding: 12px;
+      padding: 11px 12px;
       font-size: 14px;
       margin-top: 6px;
       margin-bottom: 12px;
@@ -442,14 +650,15 @@
 
     .primary-btn {
       width: 100%;
-      padding: 13px;
-      border-radius: 12px;
+      padding: 14px;
+      border-radius: 14px;
       border: none;
       background: linear-gradient(90deg, #fe2c55, #ff5e3a);
       color: #fff;
       font-size: 15px;
       font-weight: 800;
       cursor: pointer;
+      box-shadow: 0 6px 20px rgba(254, 44, 85, 0.35);
     }
 
     .secondary-btn {
@@ -569,14 +778,14 @@
     .grid-posts {
       display: grid;
       grid-template-columns: repeat(3, 1fr);
-      gap: 4px;
+      gap: 6px;
       margin-top: 12px;
     }
 
     .grid-item {
       aspect-ratio: 9 / 14;
       background: #27272a;
-      border-radius: 8px;
+      border-radius: 10px;
       padding: 8px;
       display: flex;
       flex-direction: column;
@@ -592,7 +801,7 @@
       width: 100%;
       height: 100%;
       object-fit: cover;
-      opacity: 0.65;
+      opacity: 0.7;
     }
 
     .grid-item-content {
@@ -601,6 +810,24 @@
       font-size: 11px;
       font-weight: 700;
       text-shadow: 0 1px 4px #000;
+    }
+
+    .grid-delete-btn {
+      position: absolute;
+      top: 5px;
+      right: 5px;
+      z-index: 5;
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+      border: none;
+      background: rgba(239, 68, 68, 0.85);
+      color: #fff;
+      font-size: 12px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
     }
 
     .toast {
@@ -617,6 +844,7 @@
       z-index: 90;
       box-shadow: 0 6px 20px rgba(0,0,0,0.5);
       display: none;
+      white-space: nowrap;
     }
   </style>
 </head>
@@ -638,10 +866,12 @@
     </div>
   </div>
 
+  <!-- Экран 1: Лента -->
   <div id="screen-feed" class="screen active">
     <div id="feed-container"></div>
   </div>
 
+  <!-- Экран 2: Поиск и люди -->
   <div id="screen-discover" class="screen">
     <div class="page-scroll">
       <h2 style="margin-bottom: 10px;">Поиск и авторы</h2>
@@ -654,48 +884,107 @@
     </div>
   </div>
 
+  <!-- Экран 3: Студия создания ролика -->
   <div id="screen-create" class="screen">
     <div class="page-scroll">
-      <h2 style="margin-bottom: 12px;">Новый ролик</h2>
+      <div class="studio-header">
+        <h2>Студия ролика</h2>
+        <button class="secondary-btn" onclick="resetStudio()">Сбросить</button>
+      </div>
+
+      <!-- Живой предпросмотр -->
+      <div id="studio-preview" class="studio-preview">
+        <video id="preview-video" style="display:none;" loop playsinline muted></video>
+        <img id="preview-image" style="display:none;" alt="" />
+        <div class="studio-preview-content">
+          <div id="preview-emoji" style="font-size:44px; margin-bottom:6px;">🎬</div>
+          <div id="preview-title" style="font-weight:900; font-size:16px;">Предпросмотр твоего ролика</div>
+          <div id="preview-sound-hint" style="font-size:11px; color:#a1a1aa; margin-top:4px;">🔊 Оригинальный звук видео</div>
+        </div>
+      </div>
+
+      <!-- Шаг 1: Медиа -->
       <div class="card-box">
-        <label style="font-size:13px; color:#a1a1aa;">Стикер / эмодзи ролика</label>
-        <input type="text" id="post-emoji" class="input-field" value="🎬" maxlength="4" />
+        <div class="section-title">1. Видео и медиафайлы</div>
+        <div class="file-drop-row">
+          <label class="file-tile" id="tile-video">
+            <input type="file" id="post-video" accept="video/*" onchange="onStudioMediaChange()" />
+            <span class="file-tile-ico">🎥</span>
+            <span class="file-tile-label">Выбрать видео</span>
+            <span class="file-tile-sub" id="video-file-name">MP4 / MOV / WebM</span>
+          </label>
 
-        <label style="font-size:13px; color:#a1a1aa;">Текст на экране (мем / заголовок)</label>
-        <input type="text" id="post-title" class="input-field" placeholder="Например: Мой новый видос с битом" />
+          <label class="file-tile" id="tile-image">
+            <input type="file" id="post-image" accept="image/*" onchange="onStudioMediaChange()" />
+            <span class="file-tile-ico">🖼️</span>
+            <span class="file-tile-label">Или фото</span>
+            <span class="file-tile-sub" id="image-file-name">JPG / PNG / WebP</span>
+          </label>
+        </div>
 
-        <label style="font-size:13px; color:#a1a1aa;">Описание и хэштеги</label>
-        <textarea id="post-caption" class="textarea-field" rows="2" placeholder="Всем привет! #видео #тиктак #друзья"></textarea>
-
-        <label style="font-size:13px; color:#a1a1aa;">Фоновая тема (если нет видео/фото)</label>
-        <select id="post-theme" class="select-field">
+        <label style="font-size:12px; color:#a1a1aa;">Фон (если ролик без видео и фото)</label>
+        <select id="post-theme" class="select-field" style="margin-bottom:0;" onchange="updateStudioPreview()">
           <option value="neon">Неоновый закат</option>
           <option value="cyber">Киберпанк матрица</option>
           <option value="ocean">Глубокий океан</option>
           <option value="fire">Огненный вайб</option>
           <option value="purple">Космос</option>
         </select>
-
-        <label style="font-size:13px; color:#a1a1aa;">Загрузи видео с устройства (MP4 / WebM / MOV)</label>
-        <input type="file" id="post-video" accept="video/*" class="input-field" />
-
-        <label style="font-size:13px; color:#a1a1aa;">Загрузи свой звук / трек для ролика (MP3 / WAV / OGG)</label>
-        <input type="file" id="post-audio" accept="audio/*" class="input-field" />
-
-        <label style="font-size:13px; color:#a1a1aa;">Режим звука для этого ролика</label>
-        <select id="post-sound-mode" class="select-field">
-          <option value="custom_or_video">Со звуком (свой трек или родной звук видео)</option>
-          <option value="muted">Без звука (принудительно выключить звук ролика)</option>
-        </select>
-
-        <label style="font-size:13px; color:#a1a1aa;">Или загрузи фото (необязательно)</label>
-        <input type="file" id="post-image" accept="image/*" class="input-field" />
-
-        <button id="publish-btn" class="primary-btn" onclick="publishPost()">Опубликовать для всех 🚀</button>
       </div>
+
+      <!-- Шаг 2: Настройка звука и громкости -->
+      <div class="card-box">
+        <div class="section-title">2. Настройка звука и музыки</div>
+
+        <div class="segmented-control">
+          <button type="button" class="seg-btn active" id="smode-original" onclick="setStudioSoundMode('original')">🔊 Звук видео</button>
+          <button type="button" class="seg-btn" id="smode-music" onclick="setStudioSoundMode('music')">🎵 + Музыка</button>
+          <button type="button" class="seg-btn" id="smode-muted" onclick="setStudioSoundMode('muted')">🔇 Без звука</button>
+        </div>
+
+        <div id="original-vol-box" class="slider-group">
+          <div class="slider-header">
+            <span>Громкость оригинального звука видео</span>
+            <span id="video-vol-val">100%</span>
+          </div>
+          <input type="range" id="video-volume" min="0" max="100" value="100" oninput="onVolumeChange()" />
+        </div>
+
+        <div id="music-settings-box" style="display:none;">
+          <label class="file-tile" id="tile-audio" style="margin-bottom:10px; flex-direction:row; justify-content:center; gap:10px;">
+            <input type="file" id="post-audio" accept="audio/*" onchange="onStudioMediaChange()" />
+            <span class="file-tile-ico">🎧</span>
+            <div style="text-align:left;">
+              <div class="file-tile-label">Загрузить свою музыку / звук</div>
+              <div class="file-tile-sub" id="audio-file-name">MP3 / WAV / M4A / OGG</div>
+            </div>
+          </label>
+
+          <div class="slider-group" style="margin-bottom:0;">
+            <div class="slider-header">
+              <span>Громкость добавленной музыки</span>
+              <span id="music-vol-val">60%</span>
+            </div>
+            <input type="range" id="music-volume" min="0" max="100" value="60" oninput="onVolumeChange()" />
+          </div>
+        </div>
+      </div>
+
+      <!-- Шаг 3: Текст и описание -->
+      <div class="card-box">
+        <div class="section-title">3. Оформление и описание</div>
+        <div style="display:flex; gap:8px;">
+          <input type="text" id="post-emoji" class="input-field" style="width:68px; text-align:center;" value="🎬" maxlength="4" oninput="updateStudioPreview()" />
+          <input type="text" id="post-title" class="input-field" style="flex:1;" placeholder="Заголовок на экране (необязательно)" oninput="updateStudioPreview()" />
+        </div>
+        <textarea id="post-caption" class="textarea-field" rows="2" style="margin-bottom:0;" placeholder="Описание и хэштеги #тиктак #видео"></textarea>
+      </div>
+
+      <button id="publish-btn" class="primary-btn" onclick="publishPost()">Опубликовать ролик 🚀</button>
     </div>
   </div>
 
+  <!-- Экран 4: Профиль -->
   <div id="screen-profile" class="screen">
     <div class="page-scroll">
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
@@ -736,6 +1025,7 @@
     </div>
   </div>
 
+  <!-- Шторка комментариев -->
   <div id="comments-drawer" class="drawer-backdrop" onclick="if(event.target===this) closeComments()">
     <div class="drawer-panel">
       <div class="drawer-header">
@@ -750,6 +1040,7 @@
     </div>
   </div>
 
+  <!-- Нижняя навигация -->
   <div class="bottom-nav">
     <button class="nav-btn active" id="nav-feed" onclick="switchScreen('feed')"><span class="ico">🏠</span>Главная</button>
     <button class="nav-btn" id="nav-discover" onclick="switchScreen('discover')"><span class="ico">🔍</span>Друзья</button>
@@ -761,8 +1052,8 @@
 <script type="module">
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
   import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
-  import { getFirestore, collection, doc, setDoc, addDoc, updateDoc, onSnapshot, query, orderBy, arrayUnion, increment } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
-  import { getDatabase, ref as rtdbRef, set as rtdbSet, push as rtdbPush, onValue as rtdbOnValue, update as rtdbUpdate } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
+  import { getFirestore, collection, doc, setDoc, addDoc, updateDoc, deleteDoc, onSnapshot, query, orderBy, arrayUnion, increment } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+  import { getDatabase, ref as rtdbRef, set as rtdbSet, push as rtdbPush, remove as rtdbRemove, onValue as rtdbOnValue, update as rtdbUpdate } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
 
   const firebaseConfig = {
     apiKey: "AIzaSyAbO_x3Fpj4wTcpgGZDNS22DHrGj6uOqa0",
@@ -780,7 +1071,7 @@
   const db = getFirestore(app);
   const rtdb = getDatabase(app);
 
-  // Локальное хранилище медиафайлов (IndexedDB) для тяжёлых видео и звуков
+  // Локальная база IndexedDB для видео и музыки
   function openMediaDB() {
     return new Promise((resolve, reject) => {
       const req = indexedDB.open("tiktak_media_db", 1);
@@ -809,6 +1100,15 @@
     }
   }
 
+  async function deleteLocalMedia(key) {
+    if (!key) return;
+    try {
+      const database = await openMediaDB();
+      const tx = database.transaction("media", "readwrite");
+      tx.objectStore("media").delete(key);
+    } catch (_) {}
+  }
+
   async function getLocalMediaUrl(key) {
     if (!key) return "";
     try {
@@ -830,7 +1130,7 @@
     }
   }
 
-  // Сохранение профиля и прогресса пользователя
+  // Сохранение прогресса пользователя
   let localProfile = JSON.parse(localStorage.getItem("tiktak_user") || "null") || {
     uid: "local_" + Math.random().toString(36).slice(2, 9),
     name: "Автор_" + Math.floor(100 + Math.random() * 900),
@@ -851,6 +1151,9 @@
   let globalSoundEnabled = false;
   let activeAudioEl = null;
   let currentVisiblePostId = null;
+  let isCurrentVideoPaused = false;
+  let tapTimeout = null;
+  let studioSoundMode = "original"; // original | music | muted
 
   const THEMES = {
     neon: ["#ff007f", "#7928ca", "#00d4ff"],
@@ -885,6 +1188,97 @@
     label.textContent = text;
   }
 
+  // Настройки студии ролика
+  window.setStudioSoundMode = function(mode) {
+    studioSoundMode = mode;
+    document.getElementById("smode-original").classList.toggle("active", mode === "original");
+    document.getElementById("smode-music").classList.toggle("active", mode === "music");
+    document.getElementById("smode-muted").classList.toggle("active", mode === "muted");
+
+    document.getElementById("original-vol-box").style.display = mode === "muted" ? "none" : "block";
+    document.getElementById("music-settings-box").style.display = mode === "music" ? "block" : "none";
+    updateStudioPreview();
+  };
+
+  window.onVolumeChange = function() {
+    const vVol = document.getElementById("video-volume").value;
+    const mVol = document.getElementById("music-volume").value;
+    document.getElementById("video-vol-val").textContent = vVol + "%";
+    document.getElementById("music-vol-val").textContent = mVol + "%";
+    updateStudioPreview();
+  };
+
+  window.onStudioMediaChange = function() {
+    const vFile = document.getElementById("post-video").files?.[0];
+    const iFile = document.getElementById("post-image").files?.[0];
+    const aFile = document.getElementById("post-audio").files?.[0];
+
+    document.getElementById("tile-video").classList.toggle("selected", Boolean(vFile));
+    document.getElementById("video-file-name").textContent = vFile ? vFile.name : "MP4 / MOV / WebM";
+
+    document.getElementById("tile-image").classList.toggle("selected", Boolean(iFile));
+    document.getElementById("image-file-name").textContent = iFile ? iFile.name : "JPG / PNG / WebP";
+
+    document.getElementById("tile-audio").classList.toggle("selected", Boolean(aFile));
+    document.getElementById("audio-file-name").textContent = aFile ? aFile.name : "MP3 / WAV / M4A / OGG";
+
+    const prevVid = document.getElementById("preview-video");
+    const prevImg = document.getElementById("preview-image");
+
+    if (vFile) {
+      prevVid.src = URL.createObjectURL(vFile);
+      prevVid.style.display = "block";
+      prevVid.play().catch(() => {});
+      prevImg.style.display = "none";
+    } else if (iFile) {
+      prevImg.src = URL.createObjectURL(iFile);
+      prevImg.style.display = "block";
+      prevVid.style.display = "none";
+    } else {
+      prevVid.style.display = "none";
+      prevImg.style.display = "none";
+    }
+    updateStudioPreview();
+  };
+
+  window.updateStudioPreview = function() {
+    const emoji = document.getElementById("post-emoji").value.trim() || "🎬";
+    const title = document.getElementById("post-title").value.trim() || "Предпросмотр твоего ролика";
+    const theme = document.getElementById("post-theme").value;
+    const colors = THEMES[theme] || THEMES.neon;
+    const previewBox = document.getElementById("studio-preview");
+    previewBox.style.background = `linear-gradient(135deg, ${colors[0]}, ${colors[1]}, ${colors[2]})`;
+
+    document.getElementById("preview-emoji").textContent = emoji;
+    document.getElementById("preview-title").textContent = title;
+
+    const vVol = document.getElementById("video-volume").value;
+    const mVol = document.getElementById("music-volume").value;
+    const hint = document.getElementById("preview-sound-hint");
+    if (studioSoundMode === "muted") {
+      hint.textContent = "🔇 Без звука";
+    } else if (studioSoundMode === "music") {
+      hint.textContent = `🔊 Видео ${vVol}% + 🎵 Музыка ${mVol}%`;
+    } else {
+      hint.textContent = `🔊 Оригинальный звук видео (${vVol}%)`;
+    }
+  };
+
+  window.resetStudio = function() {
+    document.getElementById("post-video").value = "";
+    document.getElementById("post-image").value = "";
+    document.getElementById("post-audio").value = "";
+    document.getElementById("post-title").value = "";
+    document.getElementById("post-caption").value = "";
+    document.getElementById("post-emoji").value = "🎬";
+    document.getElementById("video-volume").value = 100;
+    document.getElementById("music-volume").value = 60;
+    onVolumeChange();
+    setStudioSoundMode("original");
+    onStudioMediaChange();
+  };
+
+  // Управление звуком и паузой в ленте
   window.toggleGlobalSound = function() {
     globalSoundEnabled = !globalSoundEnabled;
     const btn = document.getElementById("global-sound-btn");
@@ -905,14 +1299,19 @@
 
   async function applyMediaPlaybackForVisibleCard() {
     stopAllMediaAudio();
+    isCurrentVideoPaused = false;
+    document.querySelectorAll(".video-card").forEach(c => c.classList.remove("paused"));
+
     const all = [...realPosts, ...generatedPosts];
     const post = all.find(p => p.id === currentVisiblePostId);
     const cardEl = currentVisiblePostId ? document.querySelector(`.video-card[data-post-id="${currentVisiblePostId}"]`) : null;
     if (!post || !cardEl) return;
 
     const videoEl = cardEl.querySelector("video");
-    const soundMode = post.soundMode || "custom_or_video";
+    const soundMode = post.soundMode || "original";
     const isMutedByPost = soundMode === "muted";
+    const videoVol = typeof post.videoVolume === "number" ? post.videoVolume / 100 : 1;
+    const musicVol = typeof post.musicVolume === "number" ? post.musicVolume / 100 : 0.6;
 
     let audioSrc = post.audioData || "";
     if (!audioSrc && post.localAudioKey) {
@@ -920,8 +1319,9 @@
     }
 
     if (videoEl) {
+      videoEl.volume = Math.max(0, Math.min(1, videoVol));
       videoEl.play().catch(() => {});
-      if (!isMutedByPost && globalSoundEnabled && !audioSrc) {
+      if (!isMutedByPost && globalSoundEnabled && videoVol > 0) {
         videoEl.muted = false;
         videoEl.play().catch(() => {});
       } else {
@@ -929,13 +1329,47 @@
       }
     }
 
-    if (!isMutedByPost && globalSoundEnabled && audioSrc) {
-      if (videoEl) videoEl.muted = true;
+    if (!isMutedByPost && globalSoundEnabled && audioSrc && musicVol > 0) {
       activeAudioEl = new Audio(audioSrc);
+      activeAudioEl.volume = Math.max(0, Math.min(1, musicVol));
       activeAudioEl.loop = true;
       activeAudioEl.play().catch(() => {});
     }
   }
+
+  window.toggleCardPause = function(postId) {
+    if (postId !== currentVisiblePostId) return;
+    const cardEl = document.querySelector(`.video-card[data-post-id="${postId}"]`);
+    if (!cardEl) return;
+    const videoEl = cardEl.querySelector("video");
+
+    isCurrentVideoPaused = !isCurrentVideoPaused;
+    cardEl.classList.toggle("paused", isCurrentVideoPaused);
+
+    if (isCurrentVideoPaused) {
+      if (videoEl) videoEl.pause();
+      if (activeAudioEl) activeAudioEl.pause();
+    } else {
+      if (videoEl) videoEl.play().catch(() => {});
+      if (activeAudioEl && globalSoundEnabled) activeAudioEl.play().catch(() => {});
+    }
+  };
+
+  window.handleCardTap = function(e, postId) {
+    if (e.target.closest("button") || e.target.closest(".avatar-wrap") || e.target.closest(".author-name")) {
+      return;
+    }
+    if (tapTimeout) {
+      clearTimeout(tapTimeout);
+      tapTimeout = null;
+      handleDoubleTap(e, postId);
+    } else {
+      tapTimeout = setTimeout(() => {
+        tapTimeout = null;
+        toggleCardPause(postId);
+      }, 230);
+    }
+  };
 
   function generateMorePosts(count = 6) {
     for (let i = 0; i < count; i++) {
@@ -952,7 +1386,7 @@
         caption: "Рекомендации для тебя ✨",
         tags: tpl.tags,
         theme: tpl.theme,
-        soundMode: "custom_or_video",
+        soundMode: "original",
         likes: Math.floor(120 + Math.random() * 4500),
         comments: [
           { author: "Гость_77", avatar: "🔥", text: "Жиза жизненная 😂" },
@@ -1000,8 +1434,7 @@
         if (document.getElementById("screen-profile").classList.contains("active")) {
           renderProfile(viewedUserId);
         }
-      }, (err) => {
-        console.warn("Firestore недоступен, пробуем RTDB:", err.message);
+      }, () => {
         initRealtimeFallback();
       });
 
@@ -1071,35 +1504,48 @@
       const colors = THEMES[post.theme] || THEMES.neon;
       const isLiked = likedPosts.has(post.id);
       const isSub = localProfile.following.includes(post.authorId);
+      const isMine = post.authorId === localProfile.uid;
       const commentsCount = Array.isArray(post.comments) ? post.comments.length : 0;
       const videoSrc = post._resolvedVideoUrl || post.videoData || "";
-      const isMutedMode = (post.soundMode || "custom_or_video") === "muted";
+      const soundMode = post.soundMode || "original";
       const hasCustomAudio = Boolean(post.audioData || post.localAudioKey);
 
-      let soundLabel = isMutedMode
-        ? "🔇 Без звука"
-        : (hasCustomAudio ? "🎵 Свой звук" : (videoSrc ? "🔊 Звук видео" : "🔇 Тишина"));
+      let audioPillText = "";
+      if (soundMode === "muted") {
+        audioPillText = "🔇 Без звука";
+      } else if (soundMode === "music" || hasCustomAudio) {
+        audioPillText = `🎵 Музыка ${post.musicVolume ?? 60}%`;
+      } else if (videoSrc) {
+        audioPillText = "🔊 Оригинальный звук";
+      }
 
       return `
-        <div class="video-card" data-post-id="${post.id}" style="background: linear-gradient(135deg, ${colors[0]}, ${colors[1]}, ${colors[2]});" ondblclick="handleDoubleTap(event, '${post.id}')">
+        <div class="video-card" data-post-id="${post.id}" style="background: linear-gradient(135deg, ${colors[0]}, ${colors[1]}, ${colors[2]});" onclick="handleCardTap(event, '${post.id}')">
           ${videoSrc ? `<video class="video-media" src="${videoSrc}" loop playsinline muted autoplay></video>` : (post.imageData ? `<img class="video-media" src="${post.imageData}" alt="" />` : "")}
-          <div class="meme-overlay">
-            <span class="meme-emoji">${post.emoji || "🎬"}</span>
-            <div class="meme-title">${escapeHtml(post.title || "Новый ролик")}</div>
-            <div class="sound-badge">${soundLabel}</div>
-          </div>
+          <div class="video-vignette"></div>
+          <div class="pause-indicator">⏸</div>
+
+          ${(!videoSrc || post.title) ? `
+            <div class="meme-overlay ${videoSrc ? "has-video" : ""}">
+              ${!videoSrc ? `<span class="meme-emoji">${post.emoji || "🎬"}</span>` : ""}
+              ${post.title ? `<div class="meme-title">${escapeHtml(post.title)}</div>` : ""}
+            </div>
+          ` : ""}
 
           <div class="video-meta">
-            ${post.isReal ? `<span class="real-badge">● Реальный автор</span>` : ""}
+            <div class="meta-badges">
+              ${post.isReal ? `<span class="real-badge">● Реальный автор</span>` : ""}
+              ${audioPillText ? `<span class="audio-pill">${audioPillText}</span>` : ""}
+            </div>
             <div class="author-name" onclick="openUserProfile('${post.authorId}', '${escapeAttr(post.authorName)}', '${escapeAttr(post.authorAvatar || "😎")}')">@${escapeHtml(post.authorName)}</div>
-            <div class="video-caption">${escapeHtml(post.caption || "")}</div>
+            ${post.caption ? `<div class="video-caption">${escapeHtml(post.caption)}</div>` : ""}
             <div class="video-tags">${escapeHtml(post.tags || "#тиктак")}</div>
           </div>
 
           <div class="actions-col">
             <div class="avatar-wrap" onclick="openUserProfile('${post.authorId}', '${escapeAttr(post.authorName)}', '${escapeAttr(post.authorAvatar || "😎")}')">
               <div class="avatar-circle">${post.authorAvatar || "😎"}</div>
-              ${post.authorId !== localProfile.uid ? `
+              ${!isMine ? `
                 <button class="follow-badge ${isSub ? "subscribed" : ""}" onclick="event.stopPropagation(); toggleFollow('${post.authorId}')">${isSub ? "✓" : "+"}</button>
               ` : ""}
             </div>
@@ -1114,10 +1560,17 @@
               <span class="action-count">${commentsCount}</span>
             </button>
 
-            <button class="action-btn" onclick="copyInviteLink()">
-              <div class="action-icon">↪️</div>
-              <span class="action-count">Позвать</span>
-            </button>
+            ${isMine ? `
+              <button class="action-btn delete-btn" onclick="deletePost('${post.id}')">
+                <div class="action-icon">🗑️</div>
+                <span class="action-count">Удалить</span>
+              </button>
+            ` : `
+              <button class="action-btn" onclick="copyInviteLink()">
+                <div class="action-icon">↪️</div>
+                <span class="action-count">Позвать</span>
+              </button>
+            `}
           </div>
         </div>
       `;
@@ -1174,6 +1627,32 @@
     if (name === "discover") renderDiscover();
   };
 
+  // Удаление своего ролика
+  window.deletePost = async function(postId) {
+    if (!confirm("Удалить этот ролик для всех?")) return;
+    const target = realPosts.find(p => p.id === postId);
+    if (target) {
+      await deleteLocalMedia(target.localVideoKey);
+      await deleteLocalMedia(target.localAudioKey);
+    }
+
+    realPosts = realPosts.filter(p => p.id !== postId);
+    renderFeed();
+    renderDiscover();
+    if (document.getElementById("screen-profile").classList.contains("active")) {
+      renderProfile(viewedUserId);
+    }
+
+    try {
+      await deleteDoc(doc(db, "tiktak_posts", postId));
+    } catch (_) {}
+    try {
+      await rtdbRemove(rtdbRef(rtdb, "tiktak_posts/" + postId));
+    } catch (_) {}
+
+    showToast("Ролик удалён 🗑️");
+  };
+
   window.toggleLike = async function(postId) {
     const isLiked = likedPosts.has(postId);
     const delta = isLiked ? -1 : 1;
@@ -1202,7 +1681,7 @@
     }
   };
 
-  window.handleDoubleTap = function(e, postId) {
+  function handleDoubleTap(e, postId) {
     const heart = document.createElement("div");
     heart.className = "double-tap-heart";
     heart.textContent = "❤️";
@@ -1212,7 +1691,7 @@
     setTimeout(() => heart.remove(), 750);
 
     if (!likedPosts.has(postId)) toggleLike(postId);
-  };
+  }
 
   window.toggleFollow = function(authorId) {
     if (!authorId || authorId === localProfile.uid) return;
@@ -1320,13 +1799,14 @@
     const title = document.getElementById("post-title").value.trim();
     const caption = document.getElementById("post-caption").value.trim();
     const theme = document.getElementById("post-theme").value;
-    const soundMode = document.getElementById("post-sound-mode").value;
+    const videoVolume = Number(document.getElementById("video-volume").value);
+    const musicVolume = Number(document.getElementById("music-volume").value);
     const videoFile = document.getElementById("post-video").files?.[0] || null;
     const audioFile = document.getElementById("post-audio").files?.[0] || null;
     const imageFile = document.getElementById("post-image").files?.[0] || null;
 
     if (!title && !videoFile && !imageFile && !audioFile) {
-      showToast("Напиши текст или выбери видео / звук / фото!");
+      showToast("Выбери видео/фото или напиши текст!");
       return;
     }
 
@@ -1344,7 +1824,7 @@
       const mediaId = "vid_" + Date.now() + "_" + Math.random().toString(36).slice(2, 7);
       await saveLocalMedia(mediaId, videoFile);
       localVideoKey = mediaId;
-      if (videoFile.size <= 520 * 1024) {
+      if (videoFile.size <= 550 * 1024) {
         videoData = await fileToDataUrl(videoFile);
       }
     }
@@ -1360,16 +1840,20 @@
       }
     }
 
+    const effectiveSoundMode = (studioSoundMode === "music" && !audioFile) ? "original" : studioSoundMode;
+
     const postPayload = {
       authorId: localProfile.uid,
       authorName: localProfile.name,
       authorAvatar: localProfile.avatar,
       emoji,
-      title: title || (videoFile ? "Новый видеоролик" : "Мой новый пост"),
-      caption: caption || "",
+      title,
+      caption,
       tags: "#видео #тиктак #друзья",
       theme,
-      soundMode,
+      soundMode: effectiveSoundMode,
+      videoVolume,
+      musicVolume,
       imageData,
       videoData,
       localVideoKey,
@@ -1393,18 +1877,13 @@
         localItem._resolvedVideoUrl = localVideoKey ? await getLocalMediaUrl(localVideoKey) : videoData;
         realPosts.unshift(localItem);
         renderFeed();
-        showToast("Сохранено на устройстве (проверь Rules)");
+        showToast("Сохранено на устройстве");
       }
     }
 
     btn.disabled = false;
-    btn.textContent = "Опубликовать для всех 🚀";
-
-    document.getElementById("post-title").value = "";
-    document.getElementById("post-caption").value = "";
-    document.getElementById("post-video").value = "";
-    document.getElementById("post-audio").value = "";
-    document.getElementById("post-image").value = "";
+    btn.textContent = "Опубликовать ролик 🚀";
+    resetStudio();
     switchScreen("feed");
     document.getElementById("feed-container").scrollTo({ top: 0, behavior: "smooth" });
   };
@@ -1469,7 +1948,7 @@
       return `
         <div class="grid-item" style="background:linear-gradient(135deg, ${colors[0]}, ${colors[1]});" onclick="switchScreen('feed')">
           ${vSrc ? `<video src="${vSrc}" muted playsinline></video>` : (p.imageData ? `<img src="${p.imageData}" />` : "")}
-          <div class="grid-item-content">${p.emoji || "🎬"} ${escapeHtml((p.title || "").slice(0, 32))}</div>
+          <div class="grid-item-content">${p.emoji || "🎬"} ${escapeHtml((p.title || "Видео").slice(0, 32))}</div>
           <div class="grid-item-content" style="color:#a1a1aa;">@${escapeHtml(p.authorName)}</div>
         </div>
       `;
@@ -1526,8 +2005,9 @@
           const vSrc = p._resolvedVideoUrl || p.videoData || "";
           return `
             <div class="grid-item" style="background:linear-gradient(135deg, ${colors[0]}, ${colors[1]});" onclick="switchScreen('feed')">
+              ${isMe ? `<button class="grid-delete-btn" onclick="event.stopPropagation(); deletePost('${p.id}')">✕</button>` : ""}
               ${vSrc ? `<video src="${vSrc}" muted playsinline></video>` : (p.imageData ? `<img src="${p.imageData}" />` : "")}
-              <div class="grid-item-content">${p.emoji || "🎬"} ${escapeHtml((p.title || "").slice(0, 36))}</div>
+              <div class="grid-item-content">${p.emoji || "🎬"} ${escapeHtml((p.title || "Видео").slice(0, 36))}</div>
               <div class="grid-item-content">❤️ ${p.likes || 0}</div>
             </div>
           `;
