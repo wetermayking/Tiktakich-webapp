@@ -36,7 +36,6 @@
       border-right: 1px solid #1f1f23;
     }
 
-    /* Верхняя панель */
     .top-bar {
       position: absolute;
       top: 0;
@@ -48,22 +47,41 @@
       flex-direction: column;
       align-items: center;
       gap: 8px;
-      background: linear-gradient(to bottom, rgba(0,0,0,0.75), transparent);
+      background: linear-gradient(to bottom, rgba(0,0,0,0.78), transparent);
       pointer-events: none;
     }
 
-    .status-pill {
+    .top-row {
       pointer-events: auto;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+      justify-content: center;
+    }
+
+    .status-pill {
       font-size: 11px;
       font-weight: 600;
-      padding: 4px 10px;
+      padding: 5px 10px;
       border-radius: 999px;
-      background: rgba(24, 24, 27, 0.85);
+      background: rgba(24, 24, 27, 0.88);
       border: 1px solid rgba(255, 255, 255, 0.14);
       backdrop-filter: blur(8px);
       display: flex;
       align-items: center;
       gap: 6px;
+    }
+
+    .sound-toggle-pill {
+      font-size: 11px;
+      font-weight: 700;
+      padding: 5px 10px;
+      border-radius: 999px;
+      background: rgba(24, 24, 27, 0.88);
+      border: 1px solid rgba(255, 255, 255, 0.18);
+      color: #fff;
+      cursor: pointer;
     }
 
     .status-dot {
@@ -109,7 +127,6 @@
       border-radius: 2px;
     }
 
-    /* Экраны */
     .screen {
       flex: 1;
       height: 100%;
@@ -121,7 +138,6 @@
       display: flex;
     }
 
-    /* Лента */
     #feed-container {
       flex: 1;
       overflow-y: scroll;
@@ -187,7 +203,17 @@
       backdrop-filter: blur(4px);
     }
 
-    /* Правая панель действий */
+    .sound-badge {
+      display: inline-block;
+      margin-top: 10px;
+      font-size: 11px;
+      font-weight: 700;
+      padding: 4px 10px;
+      border-radius: 999px;
+      background: rgba(0,0,0,0.55);
+      border: 1px solid rgba(255,255,255,0.2);
+    }
+
     .actions-col {
       position: absolute;
       right: 12px;
@@ -279,7 +305,6 @@
       text-shadow: 0 1px 4px rgba(0,0,0,0.8);
     }
 
-    /* Нижнее описание ролика */
     .video-meta {
       position: absolute;
       left: 14px;
@@ -324,7 +349,6 @@
       color: #38bdf8;
     }
 
-    /* Сердечко по двойному тапу */
     .double-tap-heart {
       position: absolute;
       font-size: 84px;
@@ -339,7 +363,6 @@
       100% { transform: translate(-50%, -80%) scale(1); opacity: 0; }
     }
 
-    /* Нижняя навигация */
     .bottom-nav {
       position: absolute;
       bottom: 0;
@@ -391,7 +414,6 @@
       justify-content: center;
     }
 
-    /* Модальные окна и внутренние экраны */
     .page-scroll {
       flex: 1;
       overflow-y: auto;
@@ -441,7 +463,6 @@
       cursor: pointer;
     }
 
-    /* Шторка комментариев */
     .drawer-backdrop {
       position: absolute;
       inset: 0;
@@ -545,7 +566,6 @@
       cursor: pointer;
     }
 
-    /* Сетка профиля и трендов */
     .grid-posts {
       display: grid;
       grid-template-columns: repeat(3, 1fr);
@@ -566,7 +586,7 @@
       cursor: pointer;
     }
 
-    .grid-item img {
+    .grid-item img, .grid-item video {
       position: absolute;
       inset: 0;
       width: 100%;
@@ -585,7 +605,7 @@
 
     .toast {
       position: absolute;
-      top: 76px;
+      top: 86px;
       left: 50%;
       transform: translateX(-50%);
       background: #27272a;
@@ -604,11 +624,13 @@
 <div id="app">
   <div id="toast" class="toast"></div>
 
-  <!-- Верхняя панель -->
   <div class="top-bar" id="top-bar">
-    <div class="status-pill">
-      <span id="status-dot" class="status-dot"></span>
-      <span id="status-text">Подключение к облаку...</span>
+    <div class="top-row">
+      <div class="status-pill">
+        <span id="status-dot" class="status-dot"></span>
+        <span id="status-text">Подключение к облаку...</span>
+      </div>
+      <button id="global-sound-btn" class="sound-toggle-pill" onclick="toggleGlobalSound()">🔇 Звук выкл</button>
     </div>
     <div class="feed-tabs">
       <button class="feed-tab" id="tab-following" onclick="switchFeedMode('following')">Подписки</button>
@@ -616,12 +638,10 @@
     </div>
   </div>
 
-  <!-- Экран 1: Лента -->
   <div id="screen-feed" class="screen active">
     <div id="feed-container"></div>
   </div>
 
-  <!-- Экран 2: Поиск и люди -->
   <div id="screen-discover" class="screen">
     <div class="page-scroll">
       <h2 style="margin-bottom: 10px;">Поиск и авторы</h2>
@@ -634,21 +654,20 @@
     </div>
   </div>
 
-  <!-- Экран 3: Создание ролика -->
   <div id="screen-create" class="screen">
     <div class="page-scroll">
       <h2 style="margin-bottom: 12px;">Новый ролик</h2>
       <div class="card-box">
         <label style="font-size:13px; color:#a1a1aa;">Стикер / эмодзи ролика</label>
-        <input type="text" id="post-emoji" class="input-field" value="🔥" maxlength="4" />
+        <input type="text" id="post-emoji" class="input-field" value="🎬" maxlength="4" />
 
         <label style="font-size:13px; color:#a1a1aa;">Текст на экране (мем / заголовок)</label>
-        <input type="text" id="post-title" class="input-field" placeholder="Например: Когда зашёл в свой ТикТак с друзьями" />
+        <input type="text" id="post-title" class="input-field" placeholder="Например: Мой новый видос с битом" />
 
         <label style="font-size:13px; color:#a1a1aa;">Описание и хэштеги</label>
-        <textarea id="post-caption" class="textarea-field" rows="2" placeholder="Всем привет! #рек #тиктак #друзья"></textarea>
+        <textarea id="post-caption" class="textarea-field" rows="2" placeholder="Всем привет! #видео #тиктак #друзья"></textarea>
 
-        <label style="font-size:13px; color:#a1a1aa;">Фоновая тема</label>
+        <label style="font-size:13px; color:#a1a1aa;">Фоновая тема (если нет видео/фото)</label>
         <select id="post-theme" class="select-field">
           <option value="neon">Неоновый закат</option>
           <option value="cyber">Киберпанк матрица</option>
@@ -657,15 +676,26 @@
           <option value="purple">Космос</option>
         </select>
 
-        <label style="font-size:13px; color:#a1a1aa;">Или загрузи фото с устройства (необязательно)</label>
+        <label style="font-size:13px; color:#a1a1aa;">Загрузи видео с устройства (MP4 / WebM / MOV)</label>
+        <input type="file" id="post-video" accept="video/*" class="input-field" />
+
+        <label style="font-size:13px; color:#a1a1aa;">Загрузи свой звук / трек для ролика (MP3 / WAV / OGG)</label>
+        <input type="file" id="post-audio" accept="audio/*" class="input-field" />
+
+        <label style="font-size:13px; color:#a1a1aa;">Режим звука для этого ролика</label>
+        <select id="post-sound-mode" class="select-field">
+          <option value="custom_or_video">Со звуком (свой трек или родной звук видео)</option>
+          <option value="muted">Без звука (принудительно выключить звук ролика)</option>
+        </select>
+
+        <label style="font-size:13px; color:#a1a1aa;">Или загрузи фото (необязательно)</label>
         <input type="file" id="post-image" accept="image/*" class="input-field" />
 
-        <button class="primary-btn" onclick="publishPost()">Опубликовать для всех 🚀</button>
+        <button id="publish-btn" class="primary-btn" onclick="publishPost()">Опубликовать для всех 🚀</button>
       </div>
     </div>
   </div>
 
-  <!-- Экран 4: Профиль (свой или друга) -->
   <div id="screen-profile" class="screen">
     <div class="page-scroll">
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
@@ -706,7 +736,6 @@
     </div>
   </div>
 
-  <!-- Шторка комментариев -->
   <div id="comments-drawer" class="drawer-backdrop" onclick="if(event.target===this) closeComments()">
     <div class="drawer-panel">
       <div class="drawer-header">
@@ -721,7 +750,6 @@
     </div>
   </div>
 
-  <!-- Нижняя навигация -->
   <div class="bottom-nav">
     <button class="nav-btn active" id="nav-feed" onclick="switchScreen('feed')"><span class="ico">🏠</span>Главная</button>
     <button class="nav-btn" id="nav-discover" onclick="switchScreen('discover')"><span class="ico">🔍</span>Друзья</button>
@@ -730,14 +758,12 @@
   </div>
 </div>
 
-<!-- Firebase SDK (встроенные ключи проекта tiktac-5f2c6) -->
 <script type="module">
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
   import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
-  import { getFirestore, collection, doc, setDoc, addDoc, updateDoc, onSnapshot, query, orderBy, arrayUnion, arrayRemove, increment } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+  import { getFirestore, collection, doc, setDoc, addDoc, updateDoc, onSnapshot, query, orderBy, arrayUnion, increment } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
   import { getDatabase, ref as rtdbRef, set as rtdbSet, push as rtdbPush, onValue as rtdbOnValue, update as rtdbUpdate } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
 
-  // Твои вшитые ключи Firebase
   const firebaseConfig = {
     apiKey: "AIzaSyAbO_x3Fpj4wTcpgGZDNS22DHrGj6uOqa0",
     authDomain: "tiktac-5f2c6.firebaseapp.com",
@@ -754,7 +780,57 @@
   const db = getFirestore(app);
   const rtdb = getDatabase(app);
 
-  // Локальное состояние пользователя
+  // Локальное хранилище медиафайлов (IndexedDB) для тяжёлых видео и звуков
+  function openMediaDB() {
+    return new Promise((resolve, reject) => {
+      const req = indexedDB.open("tiktak_media_db", 1);
+      req.onupgradeneeded = () => {
+        const database = req.result;
+        if (!database.objectStoreNames.contains("media")) {
+          database.createObjectStore("media");
+        }
+      };
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+  }
+
+  async function saveLocalMedia(key, blob) {
+    try {
+      const database = await openMediaDB();
+      return new Promise((resolve, reject) => {
+        const tx = database.transaction("media", "readwrite");
+        tx.objectStore("media").put(blob, key);
+        tx.oncomplete = () => resolve(true);
+        tx.onerror = () => reject(tx.error);
+      });
+    } catch (_) {
+      return false;
+    }
+  }
+
+  async function getLocalMediaUrl(key) {
+    if (!key) return "";
+    try {
+      const database = await openMediaDB();
+      return new Promise((resolve) => {
+        const tx = database.transaction("media", "readonly");
+        const req = tx.objectStore("media").get(key);
+        req.onsuccess = () => {
+          if (req.result instanceof Blob) {
+            resolve(URL.createObjectURL(req.result));
+          } else {
+            resolve("");
+          }
+        };
+        req.onerror = () => resolve("");
+      });
+    } catch (_) {
+      return "";
+    }
+  }
+
+  // Сохранение профиля и прогресса пользователя
   let localProfile = JSON.parse(localStorage.getItem("tiktak_user") || "null") || {
     uid: "local_" + Math.random().toString(36).slice(2, 9),
     name: "Автор_" + Math.floor(100 + Math.random() * 900),
@@ -764,14 +840,17 @@
   };
   localStorage.setItem("tiktak_user", JSON.stringify(localProfile));
 
-  let cloudMode = "connecting"; // firestore | rtdb | offline
+  let cloudMode = "connecting";
   let realPosts = [];
   let generatedPosts = [];
   let usersMap = {};
-  let feedMode = "foryou"; // foryou | following
+  let feedMode = "foryou";
   let activeCommentPostId = null;
   let viewedUserId = localProfile.uid;
   let likedPosts = new Set(JSON.parse(localStorage.getItem("tiktak_likes") || "[]"));
+  let globalSoundEnabled = false;
+  let activeAudioEl = null;
+  let currentVisiblePostId = null;
 
   const THEMES = {
     neon: ["#ff007f", "#7928ca", "#00d4ff"],
@@ -806,7 +885,58 @@
     label.textContent = text;
   }
 
-  // Бесконечная генерация рекомендаций
+  window.toggleGlobalSound = function() {
+    globalSoundEnabled = !globalSoundEnabled;
+    const btn = document.getElementById("global-sound-btn");
+    btn.textContent = globalSoundEnabled ? "🔊 Звук вкл" : "🔇 Звук выкл";
+    applyMediaPlaybackForVisibleCard();
+  };
+
+  function stopAllMediaAudio() {
+    if (activeAudioEl) {
+      activeAudioEl.pause();
+      activeAudioEl.currentTime = 0;
+      activeAudioEl = null;
+    }
+    document.querySelectorAll(".video-card video").forEach(v => {
+      v.muted = true;
+    });
+  }
+
+  async function applyMediaPlaybackForVisibleCard() {
+    stopAllMediaAudio();
+    const all = [...realPosts, ...generatedPosts];
+    const post = all.find(p => p.id === currentVisiblePostId);
+    const cardEl = currentVisiblePostId ? document.querySelector(`.video-card[data-post-id="${currentVisiblePostId}"]`) : null;
+    if (!post || !cardEl) return;
+
+    const videoEl = cardEl.querySelector("video");
+    const soundMode = post.soundMode || "custom_or_video";
+    const isMutedByPost = soundMode === "muted";
+
+    let audioSrc = post.audioData || "";
+    if (!audioSrc && post.localAudioKey) {
+      audioSrc = await getLocalMediaUrl(post.localAudioKey);
+    }
+
+    if (videoEl) {
+      videoEl.play().catch(() => {});
+      if (!isMutedByPost && globalSoundEnabled && !audioSrc) {
+        videoEl.muted = false;
+        videoEl.play().catch(() => {});
+      } else {
+        videoEl.muted = true;
+      }
+    }
+
+    if (!isMutedByPost && globalSoundEnabled && audioSrc) {
+      if (videoEl) videoEl.muted = true;
+      activeAudioEl = new Audio(audioSrc);
+      activeAudioEl.loop = true;
+      activeAudioEl.play().catch(() => {});
+    }
+  }
+
   function generateMorePosts(count = 6) {
     for (let i = 0; i < count; i++) {
       const tpl = BOT_TEMPLATES[(generatedPosts.length + i) % BOT_TEMPLATES.length];
@@ -822,6 +952,7 @@
         caption: "Рекомендации для тебя ✨",
         tags: tpl.tags,
         theme: tpl.theme,
+        soundMode: "custom_or_video",
         likes: Math.floor(120 + Math.random() * 4500),
         comments: [
           { author: "Гость_77", avatar: "🔥", text: "Жиза жизненная 😂" },
@@ -832,12 +963,22 @@
     }
   }
 
-  // Инициализация Firebase и синхронизация
+  async function hydrateLocalMediaUrls(posts) {
+    for (const p of posts) {
+      if (!p.videoData && p.localVideoKey) {
+        p._resolvedVideoUrl = await getLocalMediaUrl(p.localVideoKey);
+      } else {
+        p._resolvedVideoUrl = p.videoData || "";
+      }
+    }
+    return posts;
+  }
+
   async function initCloud() {
     try {
       await signInAnonymously(auth);
     } catch (e) {
-      console.warn("Анонимный вход не включён в Firebase Console, работаем по открытым правилам:", e.message);
+      console.warn("Анонимный вход не включён:", e.message);
     }
 
     onAuthStateChanged(auth, (user) => {
@@ -848,11 +989,11 @@
       syncUserProfileToCloud();
     });
 
-    // Пробуем Firestore
     try {
       const q = query(collection(db, "tiktak_posts"), orderBy("createdAt", "desc"));
-      onSnapshot(q, (snap) => {
-        realPosts = snap.docs.map(d => ({ id: d.id, isReal: true, ...d.data() }));
+      onSnapshot(q, async (snap) => {
+        const items = snap.docs.map(d => ({ id: d.id, isReal: true, ...d.data() }));
+        realPosts = await hydrateLocalMediaUrls(items);
         setCloudStatus("firestore", `Онлайн • Роликов друзей: ${realPosts.length}`);
         renderFeed();
         renderDiscover();
@@ -860,7 +1001,7 @@
           renderProfile(viewedUserId);
         }
       }, (err) => {
-        console.warn("Firestore недоступен, переключаемся на Realtime Database:", err.message);
+        console.warn("Firestore недоступен, пробуем RTDB:", err.message);
         initRealtimeFallback();
       });
 
@@ -873,18 +1014,18 @@
     }
   }
 
-  // Резервное подключение через Realtime Database (которая уже создана в проекте)
   function initRealtimeFallback() {
-    rtdbOnValue(rtdbRef(rtdb, "tiktak_posts"), (snap) => {
+    rtdbOnValue(rtdbRef(rtdb, "tiktak_posts"), async (snap) => {
       const val = snap.val() || {};
-      realPosts = Object.entries(val)
+      const items = Object.entries(val)
         .map(([id, data]) => ({ id, isReal: true, ...data }))
         .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+      realPosts = await hydrateLocalMediaUrls(items);
       setCloudStatus("rtdb", `Онлайн (RTDB) • Роликов: ${realPosts.length}`);
       renderFeed();
       renderDiscover();
-    }, (err) => {
-      setCloudStatus("offline", "Локальный режим (проверь Rules в Firebase)");
+    }, () => {
+      setCloudStatus("offline", "Локальный режим (проверь Rules)");
     });
 
     rtdbOnValue(rtdbRef(rtdb, "tiktak_users"), (snap) => {
@@ -903,13 +1044,11 @@
     } catch (_) {}
   }
 
-  // Отрисовка ленты
   function getAllFeedPosts() {
     const combined = [...realPosts, ...generatedPosts];
     if (feedMode === "following") {
       return combined.filter(p => localProfile.following.includes(p.authorId) || p.authorId === localProfile.uid);
     }
-    // Чередуем реальные ролики с бесконечными рекомендациями, но реальные всегда в начале
     return combined;
   }
 
@@ -933,13 +1072,21 @@
       const isLiked = likedPosts.has(post.id);
       const isSub = localProfile.following.includes(post.authorId);
       const commentsCount = Array.isArray(post.comments) ? post.comments.length : 0;
+      const videoSrc = post._resolvedVideoUrl || post.videoData || "";
+      const isMutedMode = (post.soundMode || "custom_or_video") === "muted";
+      const hasCustomAudio = Boolean(post.audioData || post.localAudioKey);
+
+      let soundLabel = isMutedMode
+        ? "🔇 Без звука"
+        : (hasCustomAudio ? "🎵 Свой звук" : (videoSrc ? "🔊 Звук видео" : "🔇 Тишина"));
 
       return `
-        <div class="video-card" style="background: linear-gradient(135deg, ${colors[0]}, ${colors[1]}, ${colors[2]});" ondblclick="handleDoubleTap(event, '${post.id}')">
-          ${post.imageData ? `<img class="video-media" src="${post.imageData}" alt="" />` : ""}
+        <div class="video-card" data-post-id="${post.id}" style="background: linear-gradient(135deg, ${colors[0]}, ${colors[1]}, ${colors[2]});" ondblclick="handleDoubleTap(event, '${post.id}')">
+          ${videoSrc ? `<video class="video-media" src="${videoSrc}" loop playsinline muted autoplay></video>` : (post.imageData ? `<img class="video-media" src="${post.imageData}" alt="" />` : "")}
           <div class="meme-overlay">
             <span class="meme-emoji">${post.emoji || "🎬"}</span>
             <div class="meme-title">${escapeHtml(post.title || "Новый ролик")}</div>
+            <div class="sound-badge">${soundLabel}</div>
           </div>
 
           <div class="video-meta">
@@ -975,9 +1122,29 @@
         </div>
       `;
     }).join("");
+
+    observeVisibleCards();
   };
 
-  // Бесконечная подгрузка при прокрутке
+  function observeVisibleCards() {
+    const cards = document.querySelectorAll("#feed-container .video-card[data-post-id]");
+    if (!cards.length) return;
+    currentVisiblePostId = cards[0].getAttribute("data-post-id");
+    applyMediaPlaybackForVisibleCard();
+
+    if (window._cardObserver) window._cardObserver.disconnect();
+    window._cardObserver = new IntersectionObserver((entries) => {
+      entries.forEach(entry => {
+        if (entry.isIntersecting && entry.intersectionRatio >= 0.6) {
+          currentVisiblePostId = entry.target.getAttribute("data-post-id");
+          applyMediaPlaybackForVisibleCard();
+        }
+      });
+    }, { root: document.getElementById("feed-container"), threshold: [0.6] });
+
+    cards.forEach(c => window._cardObserver.observe(c));
+  }
+
   document.getElementById("feed-container").addEventListener("scroll", (e) => {
     const el = e.target;
     if (el.scrollTop + el.clientHeight >= el.scrollHeight - el.clientHeight * 1.5) {
@@ -1002,10 +1169,11 @@
     if (navBtn) navBtn.classList.add("active");
 
     document.getElementById("top-bar").style.display = name === "feed" ? "flex" : "none";
+    if (name !== "feed") stopAllMediaAudio();
+    else applyMediaPlaybackForVisibleCard();
     if (name === "discover") renderDiscover();
   };
 
-  // Лайки
   window.toggleLike = async function(postId) {
     const isLiked = likedPosts.has(postId);
     const delta = isLiked ? -1 : 1;
@@ -1046,7 +1214,6 @@
     if (!likedPosts.has(postId)) toggleLike(postId);
   };
 
-  // Подписки
   window.toggleFollow = function(authorId) {
     if (!authorId || authorId === localProfile.uid) return;
     const idx = localProfile.following.indexOf(authorId);
@@ -1063,7 +1230,6 @@
     renderDiscover();
   };
 
-  // Комментарии
   window.openComments = function(postId) {
     activeCommentPostId = postId;
     document.getElementById("comments-drawer").classList.add("open");
@@ -1139,22 +1305,59 @@
     }
   };
 
-  // Публикация нового ролика
+  function fileToDataUrl(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+  }
+
   window.publishPost = async function() {
-    const emoji = document.getElementById("post-emoji").value.trim() || "🔥";
+    const btn = document.getElementById("publish-btn");
+    const emoji = document.getElementById("post-emoji").value.trim() || "🎬";
     const title = document.getElementById("post-title").value.trim();
     const caption = document.getElementById("post-caption").value.trim();
     const theme = document.getElementById("post-theme").value;
-    const fileInput = document.getElementById("post-image");
+    const soundMode = document.getElementById("post-sound-mode").value;
+    const videoFile = document.getElementById("post-video").files?.[0] || null;
+    const audioFile = document.getElementById("post-audio").files?.[0] || null;
+    const imageFile = document.getElementById("post-image").files?.[0] || null;
 
-    if (!title && !fileInput.files.length) {
-      showToast("Напиши текст ролика или выбери фото!");
+    if (!title && !videoFile && !imageFile && !audioFile) {
+      showToast("Напиши текст или выбери видео / звук / фото!");
       return;
     }
 
+    btn.disabled = true;
+    btn.textContent = "Публикуем...";
+
     let imageData = "";
-    if (fileInput.files && fileInput.files[0]) {
-      imageData = await compressImage(fileInput.files[0]);
+    if (imageFile) {
+      imageData = await compressImage(imageFile);
+    }
+
+    let videoData = "";
+    let localVideoKey = "";
+    if (videoFile) {
+      const mediaId = "vid_" + Date.now() + "_" + Math.random().toString(36).slice(2, 7);
+      await saveLocalMedia(mediaId, videoFile);
+      localVideoKey = mediaId;
+      if (videoFile.size <= 520 * 1024) {
+        videoData = await fileToDataUrl(videoFile);
+      }
+    }
+
+    let audioData = "";
+    let localAudioKey = "";
+    if (audioFile) {
+      const audioId = "aud_" + Date.now() + "_" + Math.random().toString(36).slice(2, 7);
+      await saveLocalMedia(audioId, audioFile);
+      localAudioKey = audioId;
+      if (audioFile.size <= 450 * 1024) {
+        audioData = await fileToDataUrl(audioFile);
+      }
     }
 
     const postPayload = {
@@ -1162,11 +1365,16 @@
       authorName: localProfile.name,
       authorAvatar: localProfile.avatar,
       emoji,
-      title: title || "Мой новый пост",
+      title: title || (videoFile ? "Новый видеоролик" : "Мой новый пост"),
       caption: caption || "",
-      tags: "#тиктак #друзья #рек",
+      tags: "#видео #тиктак #друзья",
       theme,
+      soundMode,
       imageData,
+      videoData,
+      localVideoKey,
+      audioData,
+      localAudioKey,
       likes: 0,
       comments: [],
       createdAt: Date.now()
@@ -1181,14 +1389,22 @@
         await rtdbSet(newRef, postPayload);
         showToast("Ролик опубликован! 🚀");
       } catch (err) {
-        realPosts.unshift({ id: "local_" + Date.now(), isReal: true, ...postPayload });
-        showToast("Сохранено локально (проверь Rules в Firebase)");
+        const localItem = { id: "local_" + Date.now(), isReal: true, ...postPayload };
+        localItem._resolvedVideoUrl = localVideoKey ? await getLocalMediaUrl(localVideoKey) : videoData;
+        realPosts.unshift(localItem);
+        renderFeed();
+        showToast("Сохранено на устройстве (проверь Rules)");
       }
     }
 
+    btn.disabled = false;
+    btn.textContent = "Опубликовать для всех 🚀";
+
     document.getElementById("post-title").value = "";
     document.getElementById("post-caption").value = "";
-    fileInput.value = "";
+    document.getElementById("post-video").value = "";
+    document.getElementById("post-audio").value = "";
+    document.getElementById("post-image").value = "";
     switchScreen("feed");
     document.getElementById("feed-container").scrollTo({ top: 0, behavior: "smooth" });
   };
@@ -1214,7 +1430,6 @@
     });
   }
 
-  // Поиск и список реальных авторов
   window.renderDiscover = function() {
     const q = (document.getElementById("search-input")?.value || "").toLowerCase().trim();
     const authorsBox = document.getElementById("real-authors-list");
@@ -1250,9 +1465,10 @@
 
     document.getElementById("discover-grid").innerHTML = filtered.slice(0, 18).map(p => {
       const colors = THEMES[p.theme] || THEMES.neon;
+      const vSrc = p._resolvedVideoUrl || p.videoData || "";
       return `
         <div class="grid-item" style="background:linear-gradient(135deg, ${colors[0]}, ${colors[1]});" onclick="switchScreen('feed')">
-          ${p.imageData ? `<img src="${p.imageData}" />` : ""}
+          ${vSrc ? `<video src="${vSrc}" muted playsinline></video>` : (p.imageData ? `<img src="${p.imageData}" />` : "")}
           <div class="grid-item-content">${p.emoji || "🎬"} ${escapeHtml((p.title || "").slice(0, 32))}</div>
           <div class="grid-item-content" style="color:#a1a1aa;">@${escapeHtml(p.authorName)}</div>
         </div>
@@ -1260,7 +1476,6 @@
     }).join("");
   };
 
-  // Профиль
   window.openMyProfile = function() {
     viewedUserId = localProfile.uid;
     switchScreen("profile");
@@ -1308,9 +1523,10 @@
       ? `<div style="grid-column:1/-1; text-align:center; color:#71717a; padding:20px;">Пока нет роликов</div>`
       : userPosts.map(p => {
           const colors = THEMES[p.theme] || THEMES.neon;
+          const vSrc = p._resolvedVideoUrl || p.videoData || "";
           return `
             <div class="grid-item" style="background:linear-gradient(135deg, ${colors[0]}, ${colors[1]});" onclick="switchScreen('feed')">
-              ${p.imageData ? `<img src="${p.imageData}" />` : ""}
+              ${vSrc ? `<video src="${vSrc}" muted playsinline></video>` : (p.imageData ? `<img src="${p.imageData}" />` : "")}
               <div class="grid-item-content">${p.emoji || "🎬"} ${escapeHtml((p.title || "").slice(0, 36))}</div>
               <div class="grid-item-content">❤️ ${p.likes || 0}</div>
             </div>
@@ -1345,7 +1561,6 @@
     return String(str).replace(/'/g, "\\'");
   }
 
-  // Старт
   generateMorePosts(8);
   renderFeed();
   initCloud();
