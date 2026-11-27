@@ -1,0 +1,2704 @@
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import { initializeApp } from 'firebase/app';
+import {
+  getAuth,
+  signInAnonymously,
+  signInWithCustomToken,
+  onAuthStateChanged
+} from 'firebase/auth';
+import {
+  getFirestore,
+  doc,
+  setDoc,
+  updateDoc,
+  deleteDoc,
+  onSnapshot,
+  collection,
+  arrayUnion,
+  arrayRemove
+} from 'firebase/firestore';
+import {
+  Heart,
+  MessageCircle,
+  Share2,
+  Plus,
+  Home,
+  User,
+  Music,
+  Play,
+  Volume2,
+  VolumeX,
+  Check,
+  X,
+  Send,
+  Trash2,
+  Edit3,
+  Sparkles,
+  Upload,
+  ChevronUp,
+  ChevronDown,
+  Film,
+  Palette,
+  Search,
+  Bell,
+  Users,
+  Globe,
+  Flame,
+  Copy
+} from 'lucide-react';
+
+// ============================================================================
+// ИНИЦИАЛИЗАЦИЯ FIREBASE (ОБЩАЯ ОБЛАЧНАЯ БАЗА ДАННЫХ В РЕАЛЬНОМ ВРЕМЕНИ)
+// ============================================================================
+const firebaseConfig =
+  typeof __firebase_config !== 'undefined'
+    ? JSON.parse(__firebase_config)
+    : { apiKey: 'demo', authDomain: 'demo.firebaseapp.com', projectId: 'demo' };
+
+const firebaseApp = initializeApp(firebaseConfig);
+const auth = getAuth(firebaseApp);
+const db = getFirestore(firebaseApp);
+const appId = typeof __app_id !== 'undefined' ? __app_id : 'tiktak-global-app';
+
+// Публичная коллекция всех роликов (доступна всем пользователям)
+const videosCollectionRef = collection(db, 'artifacts', appId, 'public', 'data', 'tiktak_videos');
+// Публичная коллекция профилей креаторов
+const profilesCollectionRef = collection(db, 'artifacts', appId, 'public', 'data', 'tiktak_profiles');
+
+// ============================================================================
+// ЛОКАЛЬНЫЙ КЭШ БОЛЬШИХ ВИДЕОФАЙЛОВ (IndexedDB для собственного устройства)
+// ============================================================================
+const DB_NAME = 'TikTakMediaCache_v2';
+const STORE_MEDIA = 'local_videos';
+
+function openMediaDB() {
+  return new Promise((resolve, reject) => {
+    try {
+      const request = indexedDB.open(DB_NAME, 1);
+      request.onupgradeneeded = (e) => {
+        const database = e.target.result;
+        if (!database.objectStoreNames.contains(STORE_MEDIA)) {
+          database.createObjectStore(STORE_MEDIA);
+        }
+      };
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    } catch (err) {
+      reject(err);
+    }
+  });
+}
+
+async function saveLocalVideoBlob(id, blob) {
+  try {
+    const database = await openMediaDB();
+    return new Promise((resolve) => {
+      const tx = database.transaction(STORE_MEDIA, 'readwrite');
+      tx.objectStore(STORE_MEDIA).put(blob, id);
+      tx.oncomplete = () => resolve(true);
+      tx.onerror = () => resolve(false);
+    });
+  } catch {
+    return false;
+  }
+}
+
+async function loadLocalVideoBlob(id) {
+  try {
+    const database = await openMediaDB();
+    return new Promise((resolve) => {
+      const tx = database.transaction(STORE_MEDIA, 'readonly');
+      const req = tx.objectStore(STORE_MEDIA).get(id);
+      req.onsuccess = () => resolve(req.result || null);
+      req.onerror = () => resolve(null);
+    });
+  } catch {
+    return null;
+  }
+}
+
+async function deleteLocalVideoBlob(id) {
+  try {
+    const database = await openMediaDB();
+    const tx = database.transaction(STORE_MEDIA, 'readwrite');
+    tx.objectStore(STORE_MEDIA).delete(id);
+  } catch {
+    // ignore
+  }
+}
+
+// Сжатие изображений или генерация превью-кадра из видео в DataURL (< 220 КБ для Firestore)
+function compressImageFileToDataUrl(file, maxWidth = 540, quality = 0.72) {
+  return new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const img = new Image();
+      img.onload = () => {
+        const scale = Math.min(1, maxWidth / img.width);
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.round(img.width * scale);
+        canvas.height = Math.round(img.height * scale);
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        resolve(canvas.toDataURL('image/jpeg', quality));
+      };
+      img.onerror = () => resolve(null);
+      img.src = ev.target.result;
+    };
+    reader.onerror = () => resolve(null);
+    reader.readAsDataURL(file);
+  });
+}
+
+function extractVideoPosterDataUrl(videoFile) {
+  return new Promise((resolve) => {
+    try {
+      const tempVideo = document.createElement('video');
+      tempVideo.preload = 'metadata';
+      tempVideo.muted = true;
+      tempVideo.playsInline = true;
+      const url = URL.createObjectURL(videoFile);
+      tempVideo.src = url;
+
+      tempVideo.onloadeddata = () => {
+        tempVideo.currentTime = Math.min(0.5, tempVideo.duration || 0);
+      };
+
+      tempVideo.onseeked = () => {
+        const scale = Math.min(1, 480 / (tempVideo.videoWidth || 480));
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.round((tempVideo.videoWidth || 360) * scale);
+        canvas.height = Math.round((tempVideo.videoHeight || 640) * scale);
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(tempVideo, 0, 0, canvas.width, canvas.height);
+        const poster = canvas.toDataURL('image/jpeg', 0.68);
+        URL.revokeObjectURL(url);
+        resolve(poster);
+      };
+
+      tempVideo.onerror = () => {
+        URL.revokeObjectURL(url);
+        resolve(null);
+      };
+    } catch {
+      resolve(null);
+    }
+  });
+}
+
+// ============================================================================
+// СИНТЕЗАТОР АТМОСФЕРНЫХ БИТОВ (Web Audio API)
+// ============================================================================
+class VibeAudioEngine {
+  constructor() {
+    this.ctx = null;
+    this.isPlaying = false;
+    this.isMuted = true;
+    this.intervalId = null;
+    this.step = 0;
+  }
+
+  init() {
+    if (!this.ctx) {
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      if (AudioCtx) this.ctx = new AudioCtx();
+    }
+    if (this.ctx && this.ctx.state === 'suspended') {
+      this.ctx.resume().catch(() => {});
+    }
+  }
+
+  setMuted(muted) {
+    this.isMuted = muted;
+    if (!muted) this.init();
+  }
+
+  playTone(freq, duration, type = 'sine', gainVal = 0.06) {
+    if (this.isMuted || !this.ctx || this.ctx.state !== 'running') return;
+    try {
+      const now = this.ctx.currentTime;
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+      osc.type = type;
+      osc.frequency.setValueAtTime(freq, now);
+      gain.gain.setValueAtTime(gainVal, now);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
+      osc.connect(gain);
+      gain.connect(this.ctx.destination);
+      osc.start(now);
+      osc.stop(now + duration);
+    } catch {
+      // ignore
+    }
+  }
+
+  startBeat(preset = 'phonk') {
+    this.stopBeat();
+    this.isPlaying = true;
+    this.step = 0;
+
+    const scales = {
+      phonk: [65.41, 65.41, 77.78, 65.41, 98.0, 87.31, 77.78, 58.27],
+      chill: [130.81, 164.81, 196.0, 246.94, 220.0, 196.0, 164.81, 146.83],
+      cyber: [110.0, 220.0, 146.83, 164.81, 110.0, 261.63, 196.0, 164.81],
+      meme: [261.63, 329.63, 392.0, 523.25, 392.0, 329.63, 293.66, 392.0],
+      lofi: [174.61, 220.0, 261.63, 329.63, 196.0, 246.94, 293.66, 349.23]
+    };
+
+    const notes = scales[preset] || scales.phonk;
+
+    this.intervalId = setInterval(() => {
+      if (!this.isPlaying || this.isMuted) return;
+      const note = notes[this.step % notes.length];
+      const wave = preset === 'phonk' || preset === 'cyber' ? 'triangle' : 'sine';
+      this.playTone(note, 0.24, wave, 0.045);
+      if (this.step % 2 === 0) {
+        this.playTone(55, 0.12, 'sine', 0.065);
+      }
+      this.step++;
+    }, 270);
+  }
+
+  stopBeat() {
+    this.isPlaying = false;
+    if (this.intervalId) {
+      clearInterval(this.intervalId);
+      this.intervalId = null;
+    }
+  }
+}
+
+const audioEngine = new VibeAudioEngine();
+
+// ============================================================================
+// ТЕМАТИКИ, МУЗЫКА И БЕСКОНЕЧНЫЙ ПРОЦЕДУРНЫЙ ГЕНЕРАТОР КОНТЕНТА
+// ============================================================================
+const VISUAL_THEMES = [
+  {
+    id: 'neon-cyber',
+    name: 'Кибер-Неон 2077',
+    gradient: 'from-fuchsia-900 via-purple-950 to-cyan-900',
+    accent: '#25F4EE',
+    particleColor: '#FE2C55',
+    mode: 'matrix'
+  },
+  {
+    id: 'sunset-vibe',
+    name: 'Закат над Москвой',
+    gradient: 'from-rose-600 via-amber-700 to-indigo-950',
+    accent: '#FBBF24',
+    particleColor: '#FB7185',
+    mode: 'waves'
+  },
+  {
+    id: 'toxic-meme',
+    name: 'Кислотный Мем',
+    gradient: 'from-emerald-900 via-teal-950 to-lime-900',
+    accent: '#A3E635',
+    particleColor: '#34D399',
+    mode: 'orbs'
+  },
+  {
+    id: 'midnight-lofi',
+    name: 'Ночной Lo-Fi Дождь',
+    gradient: 'from-slate-900 via-blue-950 to-indigo-950',
+    accent: '#60A5FA',
+    particleColor: '#818CF8',
+    mode: 'stars'
+  },
+  {
+    id: 'gold-luxury',
+    name: 'Успешный Успех',
+    gradient: 'from-amber-900 via-yellow-950 to-neutral-950',
+    accent: '#F59E0B',
+    particleColor: '#FDE047',
+    mode: 'orbs'
+  },
+  {
+    id: 'crimson-drift',
+    name: 'Ночной Дрифт',
+    gradient: 'from-red-950 via-neutral-950 to-rose-900',
+    accent: '#FB7185',
+    particleColor: '#F43F5E',
+    mode: 'matrix'
+  }
+];
+
+const MUSIC_TRACKS = [
+  { id: 'phonk', title: 'Дрифт на Жигулях (Phonk Remix) — DJ Васян' },
+  { id: 'chill', title: 'Кот смотрит в окно 10 часов — LoFi Мурзик' },
+  { id: 'cyber', title: 'Нейросеть захватила тостер — КиберДед' },
+  { id: 'meme', title: 'Опять понедельник (Speed Up) — ОфисБэнд' },
+  { id: 'lofi', title: 'Пельмени в 3 часа ночи — Ночной Жор' }
+];
+
+const STICKER_OPTIONS = ['😂', '🔥', '💀', '🚀', '🐱', '👑', '💯', '🤯', '🍕', '⚡', '❤️', '👀', '🛸', '🥟'];
+const AVATAR_OPTIONS = ['😎', '🦊', '🚀', '👑', '🐱', '🤖', '🦄', '🔥', '🎭', '👾', '🐼', '🐯'];
+
+// Банк компонентов для бесконечной процедурной генерации роликов
+const GEN_CREATORS = [
+  { id: 'bot_barsik', name: 'Барсик Официальный', username: 'barsik_boss', avatar: '😼' },
+  { id: 'bot_tomato', name: 'Сеньор Помидор JS', username: 'senior_tomato', avatar: '👨‍💻' },
+  { id: 'bot_babulya', name: 'Бабушка на Хайпе', username: 'babulya_swag', avatar: '👵' },
+  { id: 'bot_oleg', name: 'Тренер Олег', username: 'oleg_kachok', avatar: '💪' },
+  { id: 'bot_space', name: 'Космос Рядом', username: 'astro_vibe', avatar: '🪐' },
+  { id: 'bot_garage', name: 'Гараж 54 и Половинка', username: 'lada_drift', avatar: '🏎️' },
+  { id: 'bot_alina', name: 'Алина Вайб', username: 'alina_vibes', avatar: '🦋' },
+  { id: 'bot_student', name: 'Выживший на Сессии', username: 'exam_survivor', avatar: '🎓' },
+  { id: 'bot_chef', name: 'Шеф Доширак', username: 'doshik_michelin', avatar: '🍜' },
+  { id: 'bot_gamer', name: 'КиберКотлета 3000', username: 'pro_gamer_ru', avatar: '🎮' }
+];
+
+const GEN_SCENARIOS = [
+  {
+    title: 'КОГДА СКАЗАЛ «ЛЯГУ В 23:00»',
+    subtitle: 'На часах 04:17, и ты изучаешь устройство дирижаблей',
+    desc: 'Кто ещё прямо сейчас листает ленту вместо сна? Признавайтесь в комментах 👇😴',
+    tags: ['жиза', 'ночь', 'сон', 'юмор', 'рек'],
+    category: 'humor',
+    sticker: '🦉'
+  },
+  {
+    title: 'РАБОТАЕТ? НЕ ТРОГАЙ!',
+    subtitle: 'Удалил пробел — упал весь сервер в пятницу вечером',
+    desc: 'Классика разработки: задеплоил в 17:59 и выключил уведомления 💻🔥',
+    tags: ['айти', 'код', 'программирование', 'мемы', 'пятница'],
+    category: 'tech',
+    sticker: '💻'
+  },
+  {
+    title: 'ТЫ ПОЧЕМУ ТАКОЙ ХУДОЙ?!',
+    subtitle: 'Бабушка достала кастрюлю пельменей стратегического запаса',
+    desc: 'Секретный рецепт: сливочное масло, сметана и 50 пельмешек за один присест 🥟👑',
+    tags: ['еда', 'пельмени', 'бабушка', 'рецепты', 'топ'],
+    category: 'food',
+    sticker: '🥟'
+  },
+  {
+    title: 'ПОВ: ЗАШЁЛ В МАГАЗИН ЗА ХЛЕБОМ',
+    subtitle: 'Вышел с двумя пакетами вкусняшек, но без хлеба',
+    desc: 'Каждый раз одно и то же! Почему хлеб всегда в самом дальнем углу? 🛒😂',
+    tags: ['магазин', 'жиза', 'покупки', 'юмор', 'тренды'],
+    category: 'humor',
+    sticker: '🛒'
+  },
+  {
+    title: 'КОТ В 4 ЧАСА УТРА:',
+    subtitle: 'Активирован режим сверхзвукового тыгыдыка по квартире',
+    desc: 'Днём спит как ангел, а ночью тренируется к олимпиаде по паркуру 🐱⚡',
+    tags: ['кот', 'котики', 'животные', 'тыгыдык', 'милота'],
+    category: 'animals',
+    sticker: '🐱'
+  },
+  {
+    title: 'МАССОНАБОР ИДЁТ ПО ПЛАНУ',
+    subtitle: 'Купил абонемент в зал, но по пути открыли новую шаурмечную',
+    desc: 'Одна сырная шаурма содержит 100% дневной нормы счастья 🌯💪',
+    tags: ['спорт', 'шаурма', 'зож', 'мотивация', 'юмор'],
+    category: 'food',
+    sticker: '🌯'
+  },
+  {
+    title: 'МОЙ МОЗГ НА ЭКЗАМЕНЕ:',
+    subtitle: 'Вместо билета №14 играет песня про бобра на репите',
+    desc: 'Отправь тому самому другу, с которым готовились за 15 минут до пары 🎓💀',
+    tags: ['учеба', 'студенты', 'экзамен', 'школа', 'мем'],
+    category: 'humor',
+    sticker: '🧠'
+  },
+  {
+    title: 'ЗАЛИПАТЕЛЬНЫЙ КОСМО-ВАЙБ',
+    subtitle: 'Просто выдохни и посмотри на неоновые волны 10 секунд',
+    desc: 'Идеальный фон, чтобы перезагрузить голову после тяжёлого дня ✨🌌',
+    tags: ['эстетика', 'космос', 'вайб', 'релакс', 'неон'],
+    category: 'aesthetic',
+    sticker: '🪐'
+  },
+  {
+    title: 'ТЮНИНГ ДЕДУШКИНОЙ ШЕСТЁРКИ',
+    subtitle: 'Поставили турбину от пылесоса — разгон до сотни за 2 секунды',
+    desc: 'Илон Маск уже звонил, просил чертежи для новой Теслы 🚀🔧',
+    tags: ['авто', 'дрифт', 'гараж', 'фонк', 'тачки'],
+    category: 'tech',
+    sticker: '🏎️'
+  },
+  {
+    title: 'КОГДА ОТКРЫЛ ФРОНТАЛЬНУЮ КАМЕРУ',
+    subtitle: 'Случайно увидел себя снизу с тремя подбородками',
+    desc: 'У всех так или только у меня фронталка работает как кривое зеркало? 📱🤣',
+    tags: ['селфи', 'камера', 'жиза', 'приколы', 'рек'],
+    category: 'humor',
+    sticker: '🤳'
+  },
+  {
+    title: 'ПЯТНИЦА ВЕЧЕР VS ПОНЕДЕЛЬНИК УТРО',
+    subtitle: 'Два абсолютно разных человека в одном теле',
+    desc: 'Ставь лайк, если уже ждёшь выходные! 🔥🎉',
+    tags: ['выходные', 'работа', 'офис', 'настроение', 'топ'],
+    category: 'humor',
+    sticker: '⚡'
+  },
+  {
+    title: 'НЕЙРОСЕТЬ НАРИСОВАЛА МОЙ ПОНЕДЕЛЬНИК',
+    subtitle: 'Киберпанк, который мы заслужили в маршрутке в 8 утра',
+    desc: 'Будущее уже наступило, просто оно неравномерно распределено 🤖🌆',
+    tags: ['нейросеть', 'будущее', 'киберпанк', 'технологии', 'рек'],
+    category: 'tech',
+    sticker: '🤖'
+  }
+];
+
+const GEN_SAMPLE_COMMENTS = [
+  { authorName: 'Алина К.', authorAvatar: '👩', text: 'Ахаха, это буквально я сегодня утром 😂😂' },
+  { authorName: 'Димон_77', authorAvatar: '🧔', text: 'В точку! Сразу лайк и подписка 🔥' },
+  { authorName: 'Катя Вайб', authorAvatar: '🦄', text: 'Пересматриваю уже пятый раз, музыка топ 🎵' },
+  { authorName: 'Макс П.', authorAvatar: '🧢', text: 'Наконец-то годный контент в рекомендациях!' },
+  { authorName: 'Соня ✨', authorAvatar: '🌸', text: 'Отправила лучшему другу, он в истерике 💀' },
+  { authorName: 'Артём Про', authorAvatar: '🎮', text: 'Кто из 2026 года смотрит? Жмите сердечко ❤️' }
+];
+
+// Генератор бесконечных уникальных роликов
+function generateProceduralBatch(startIndex, count = 8) {
+  const batch = [];
+  for (let i = 0; i < count; i++) {
+    const seed = startIndex + i;
+    const scenario = GEN_SCENARIOS[seed % GEN_SCENARIOS.length];
+    const creator = GEN_CREATORS[(seed * 3 + 1) % GEN_CREATORS.length];
+    const theme = VISUAL_THEMES[(seed * 2) % VISUAL_THEMES.length];
+    const music = MUSIC_TRACKS[seed % MUSIC_TRACKS.length];
+
+    // Добавляем вариативность для повторных витков генератора
+    const cycle = Math.floor(seed / GEN_SCENARIOS.length);
+    const titleSuffix = cycle > 0 ? ` • ЧАСТЬ ${cycle + 1}` : '';
+
+    const c1 = GEN_SAMPLE_COMMENTS[seed % GEN_SAMPLE_COMMENTS.length];
+    const c2 = GEN_SAMPLE_COMMENTS[(seed + 2) % GEN_SAMPLE_COMMENTS.length];
+
+    batch.push({
+      id: `proc_vid_${seed}_${Math.abs((seed * 2654435761) % 99999)}`,
+      isProcedural: true,
+      authorId: creator.id,
+      authorName: creator.name,
+      authorUsername: creator.username,
+      authorAvatar: creator.avatar,
+      description: scenario.desc,
+      hashtags: scenario.tags,
+      category: scenario.category,
+      mediaType: 'generated',
+      musicId: music.id,
+      musicTitle: music.title,
+      themeId: theme.id,
+      overlayTitle: scenario.title + titleSuffix,
+      overlaySubtitle: scenario.subtitle,
+      sticker: scenario.sticker,
+      baseLikes: 12400 + ((seed * 7919) % 185000),
+      likedBy: [],
+      sharesCount: 420 + ((seed * 1301) % 14000),
+      createdAt: Date.now() - seed * 3600000,
+      comments: [
+        {
+          id: `pc_${seed}_1`,
+          authorName: c1.authorName,
+          authorAvatar: c1.authorAvatar,
+          text: c1.text,
+          likes: 45 + (seed % 320),
+          likedBy: [],
+          time: '2 ч. назад'
+        },
+        {
+          id: `pc_${seed}_2`,
+          authorName: c2.authorName,
+          authorAvatar: c2.authorAvatar,
+          text: c2.text,
+          likes: 18 + (seed % 140),
+          likedBy: [],
+          time: '45 мин. назад'
+        }
+      ]
+    });
+  }
+  return batch;
+}
+
+// ============================================================================
+// КОМПОНЕНТ ЖИВОГО АНИМИРОВАННОГО ХОЛСТА (CANVAS)
+// ============================================================================
+function AnimatedVideoCanvas({ themeId, isPlaying, overlayTitle, overlaySubtitle, sticker }) {
+  const canvasRef = useRef(null);
+  const theme = VISUAL_THEMES.find((t) => t.id === themeId) || VISUAL_THEMES[0];
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    let animationFrameId;
+    let t = 0;
+
+    const resize = () => {
+      const parent = canvas.parentElement;
+      if (parent) {
+        canvas.width = parent.clientWidth || 380;
+        canvas.height = parent.clientHeight || 680;
+      }
+    };
+    resize();
+    window.addEventListener('resize', resize);
+
+    const particles = Array.from({ length: 32 }, (_, i) => ({
+      x: Math.random() * 400,
+      y: Math.random() * 800,
+      r: 3 + Math.random() * 13,
+      speedX: (Math.random() - 0.5) * 1.6,
+      speedY: -0.6 - Math.random() * 1.6,
+      phase: i * 0.5
+    }));
+
+    const render = () => {
+      const w = canvas.width;
+      const h = canvas.height;
+      ctx.clearRect(0, 0, w, h);
+
+      if (isPlaying) t += 0.025;
+
+      if (theme.mode === 'waves') {
+        for (let layer = 0; layer < 4; layer++) {
+          ctx.beginPath();
+          ctx.moveTo(0, h);
+          for (let x = 0; x <= w; x += 14) {
+            const y =
+              h * (0.45 + layer * 0.12) +
+              Math.sin(x * 0.012 + t * (1 + layer * 0.3) + layer) * 36;
+            ctx.lineTo(x, y);
+          }
+          ctx.lineTo(w, h);
+          ctx.closePath();
+          ctx.fillStyle =
+            layer % 2 === 0 ? 'rgba(254, 44, 85, 0.18)' : 'rgba(37, 244, 238, 0.14)';
+          ctx.fill();
+        }
+      } else if (theme.mode === 'matrix') {
+        ctx.strokeStyle = 'rgba(37, 244, 238, 0.15)';
+        ctx.lineWidth = 1;
+        const gridSize = 36;
+        const offset = (t * 26) % gridSize;
+        for (let x = 0; x < w; x += gridSize) {
+          ctx.beginPath();
+          ctx.moveTo(x, 0);
+          ctx.lineTo(x, h);
+          ctx.stroke();
+        }
+        for (let y = offset; y < h; y += gridSize) {
+          ctx.beginPath();
+          ctx.moveTo(0, y);
+          ctx.lineTo(w, y);
+          ctx.stroke();
+        }
+      }
+
+      particles.forEach((p) => {
+        if (isPlaying) {
+          p.x += p.speedX + Math.sin(t + p.phase) * 0.45;
+          p.y += p.speedY;
+          if (p.y < -20) {
+            p.y = h + 20;
+            p.x = Math.random() * w;
+          }
+          if (p.x < -20) p.x = w + 20;
+          if (p.x > w + 20) p.x = -20;
+        }
+
+        const pulseR = p.r + Math.sin(t * 2 + p.phase) * 2.5;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, Math.max(1, pulseR), 0, Math.PI * 2);
+        ctx.fillStyle = theme.particleColor + '44';
+        ctx.fill();
+      });
+
+      // Аудио-эквалайзер по центру
+      const bars = 18;
+      const barWidth = 5;
+      const gap = 5;
+      const totalW = bars * (barWidth + gap);
+      const startX = (w - totalW) / 2;
+      const centerY = h * 0.63;
+
+      for (let i = 0; i < bars; i++) {
+        const amp = isPlaying
+          ? 12 + Math.abs(Math.sin(t * 3.5 + i * 0.45)) * 40
+          : 8;
+        ctx.fillStyle = i % 2 === 0 ? '#FE2C55AA' : '#25F4EEAA';
+        ctx.beginPath();
+        ctx.roundRect(startX + i * (barWidth + gap), centerY - amp / 2, barWidth, amp, 3);
+        ctx.fill();
+      }
+
+      animationFrameId = requestAnimationFrame(render);
+    };
+
+    render();
+
+    return () => {
+      cancelAnimationFrame(animationFrameId);
+      window.removeEventListener('resize', resize);
+    };
+  }, [themeId, isPlaying, theme]);
+
+  return (
+    <div className={`relative w-full h-full bg-gradient-to-br ${theme.gradient} overflow-hidden select-none`}>
+      <canvas ref={canvasRef} className="absolute inset-0 w-full h-full pointer-events-none" />
+
+      <div className="relative z-10 flex flex-col items-center justify-center h-full px-6 pb-20 text-center pointer-events-none">
+        {sticker && (
+          <div
+            className={`text-6xl sm:text-7xl mb-5 drop-shadow-[0_8px_24px_rgba(0,0,0,0.65)] ${
+              isPlaying ? 'animate-bounce' : ''
+            }`}
+          >
+            {sticker}
+          </div>
+        )}
+
+        {overlayTitle && (
+          <div className="bg-black/65 backdrop-blur-md border border-white/15 px-5 py-3.5 rounded-2xl shadow-2xl max-w-[90%] transform -rotate-1">
+            <h2 className="text-xl sm:text-2xl font-black tracking-wide text-white uppercase leading-tight drop-shadow">
+              {overlayTitle}
+            </h2>
+          </div>
+        )}
+
+        {overlaySubtitle && (
+          <div className="mt-3 bg-white/95 text-black font-bold text-xs sm:text-sm px-4 py-1.5 rounded-full shadow-lg max-w-[86%]">
+            {overlaySubtitle}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ============================================================================
+// КОМПОНЕНТ ОДНОГО ВИДЕО-СЛАЙДА В ЛЕНТЕ
+// ============================================================================
+function VideoCard({
+  video,
+  isActive,
+  isMuted,
+  onToggleMute,
+  onToggleLike,
+  onOpenComments,
+  onShare,
+  onToggleFollow,
+  isFollowing,
+  currentUserId,
+  localVideoUrl
+}) {
+  const [isPlaying, setIsPlaying] = useState(true);
+  const [progress, setProgress] = useState(0);
+  const [doubleTapHearts, setDoubleTapHearts] = useState([]);
+  const videoRef = useRef(null);
+  const lastTapRef = useRef(0);
+
+  const isLiked = Array.isArray(video.likedBy) && video.likedBy.includes(currentUserId);
+  const totalLikes = (video.baseLikes || 0) + (Array.isArray(video.likedBy) ? video.likedBy.length : 0);
+
+  useEffect(() => {
+    if (isActive) {
+      setIsPlaying(true);
+      if (videoRef.current && localVideoUrl) {
+        videoRef.current.currentTime = 0;
+        videoRef.current.play().catch(() => {});
+      }
+      if (!localVideoUrl) {
+        audioEngine.startBeat(video.musicId || 'phonk');
+      }
+    } else {
+      setIsPlaying(false);
+      if (videoRef.current) {
+        videoRef.current.pause();
+      }
+    }
+  }, [isActive, localVideoUrl, video.musicId]);
+
+  useEffect(() => {
+    if (videoRef.current) {
+      videoRef.current.muted = isMuted;
+    }
+  }, [isMuted]);
+
+  useEffect(() => {
+    if (!isActive || !isPlaying || localVideoUrl) return;
+    const timer = setInterval(() => {
+      setProgress((prev) => (prev >= 100 ? 0 : prev + 1.25));
+    }, 100);
+    return () => clearInterval(timer);
+  }, [isActive, isPlaying, localVideoUrl]);
+
+  const handleVideoTimeUpdate = () => {
+    if (videoRef.current && videoRef.current.duration) {
+      setProgress((videoRef.current.currentTime / videoRef.current.duration) * 100);
+    }
+  };
+
+  const handleScreenTap = (e) => {
+    const now = Date.now();
+    if (now - lastTapRef.current < 280) {
+      const rect = e.currentTarget.getBoundingClientRect();
+      const x = (e.clientX || rect.width / 2) - rect.left;
+      const y = (e.clientY || rect.height / 2) - rect.top;
+
+      const heartId = Date.now() + Math.random();
+      setDoubleTapHearts((prev) => [...prev, { id: heartId, x, y }]);
+      setTimeout(() => {
+        setDoubleTapHearts((prev) => prev.filter((h) => h.id !== heartId));
+      }, 900);
+
+      if (!isLiked) {
+        onToggleLike(video);
+      }
+    } else {
+      setIsPlaying((prev) => {
+        const next = !prev;
+        if (videoRef.current) {
+          if (next) videoRef.current.play().catch(() => {});
+          else videoRef.current.pause();
+        }
+        if (next && isActive && !localVideoUrl) {
+          audioEngine.startBeat(video.musicId || 'phonk');
+        } else {
+          audioEngine.stopBeat();
+        }
+        return next;
+      });
+    }
+    lastTapRef.current = now;
+  };
+
+  const formatNumber = (num) => {
+    if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M';
+    if (num >= 1000) return (num / 1000).toFixed(1) + 'K';
+    return num.toString();
+  };
+
+  const isOwnVideo = video.authorId === currentUserId;
+  const imageSource = video.imageDataUrl || null;
+
+  return (
+    <div className="relative w-full h-full snap-start snap-always bg-black flex items-center justify-center overflow-hidden">
+      <div onClick={handleScreenTap} className="relative w-full h-full cursor-pointer">
+        {localVideoUrl ? (
+          <div className="relative w-full h-full bg-black flex items-center justify-center">
+            <video
+              ref={videoRef}
+              src={localVideoUrl}
+              loop
+              playsInline
+              muted={isMuted}
+              onTimeUpdate={handleVideoTimeUpdate}
+              className="w-full h-full object-cover"
+            />
+            {(video.overlayTitle || video.sticker) && (
+              <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none px-6 pb-20">
+                {video.sticker && <div className="text-6xl mb-3 drop-shadow-lg">{video.sticker}</div>}
+                {video.overlayTitle && (
+                  <div className="bg-black/65 backdrop-blur-sm px-4 py-2 rounded-xl border border-white/15 text-center">
+                    <p className="text-white font-black text-lg uppercase">{video.overlayTitle}</p>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        ) : imageSource ? (
+          <div className="relative w-full h-full bg-neutral-950 flex items-center justify-center">
+            <img src={imageSource} alt={video.description} className="w-full h-full object-cover" />
+            <div className="absolute inset-0 bg-gradient-to-b from-black/25 via-transparent to-black/80 pointer-events-none" />
+            {(video.overlayTitle || video.sticker) && (
+              <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none px-6 pb-20">
+                {video.sticker && (
+                  <div className="text-6xl mb-4 animate-bounce drop-shadow-lg">{video.sticker}</div>
+                )}
+                {video.overlayTitle && (
+                  <div className="bg-black/70 backdrop-blur-md px-5 py-3 rounded-2xl border border-white/20 text-center">
+                    <p className="text-white font-black text-xl uppercase">{video.overlayTitle}</p>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        ) : (
+          <AnimatedVideoCanvas
+            themeId={video.themeId}
+            isPlaying={isPlaying && isActive}
+            overlayTitle={video.overlayTitle}
+            overlaySubtitle={video.overlaySubtitle}
+            sticker={video.sticker}
+          />
+        )}
+
+        <div className="absolute inset-x-0 bottom-0 h-56 bg-gradient-to-t from-black/90 via-black/40 to-transparent pointer-events-none" />
+
+        {!isPlaying && (
+          <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-20">
+            <div className="w-16 h-16 rounded-full bg-black/55 backdrop-blur-md flex items-center justify-center border border-white/20 animate-pulse">
+              <Play className="w-8 h-8 text-white fill-white ml-1" />
+            </div>
+          </div>
+        )}
+
+        {doubleTapHearts.map((heart) => (
+          <div
+            key={heart.id}
+            style={{ left: heart.x - 40, top: heart.y - 40 }}
+            className="absolute pointer-events-none z-30 animate-ping"
+          >
+            <Heart className="w-20 h-20 text-[#FE2C55] fill-[#FE2C55] drop-shadow-[0_0_20px_rgba(254,44,85,0.9)]" />
+          </div>
+        ))}
+      </div>
+
+      {/* Кнопка звука */}
+      <button
+        onClick={(e) => {
+          e.stopPropagation();
+          onToggleMute();
+        }}
+        className="absolute top-16 right-4 z-20 p-2.5 rounded-full bg-black/45 backdrop-blur-md border border-white/15 text-white hover:bg-black/70 transition active:scale-90"
+        title={isMuted ? 'Включить звук' : 'Выключить звук'}
+      >
+        {isMuted ? (
+          <VolumeX className="w-5 h-5 text-rose-400" />
+        ) : (
+          <Volume2 className="w-5 h-5 text-[#25F4EE]" />
+        )}
+      </button>
+
+      {/* Правая панель действий */}
+      <div className="absolute right-3 bottom-20 z-20 flex flex-col items-center gap-5">
+        {/* Аватар автора + подписка */}
+        <div className="relative mb-1">
+          <div className="w-12 h-12 rounded-full bg-gradient-to-tr from-[#FE2C55] to-[#25F4EE] p-0.5 shadow-lg">
+            <div className="w-full h-full rounded-full bg-neutral-900 flex items-center justify-center text-2xl">
+              {video.authorAvatar}
+            </div>
+          </div>
+          {!isOwnVideo && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onToggleFollow(video.authorId, video.authorName);
+              }}
+              className={`absolute -bottom-2 left-1/2 -translate-x-1/2 w-5 h-5 rounded-full flex items-center justify-center text-white shadow-md transition-transform active:scale-90 ${
+                isFollowing ? 'bg-emerald-500' : 'bg-[#FE2C55]'
+              }`}
+            >
+              {isFollowing ? (
+                <Check className="w-3 h-3 stroke-[3]" />
+              ) : (
+                <Plus className="w-3.5 h-3.5 stroke-[3]" />
+              )}
+            </button>
+          )}
+        </div>
+
+        {/* Лайк */}
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            onToggleLike(video);
+          }}
+          className="flex flex-col items-center gap-1 group"
+        >
+          <div className="p-2 rounded-full bg-black/30 backdrop-blur-sm group-active:scale-125 transition-transform">
+            <Heart
+              className={`w-8 h-8 transition-colors ${
+                isLiked
+                  ? 'text-[#FE2C55] fill-[#FE2C55] drop-shadow-[0_0_12px_rgba(254,44,85,0.8)]'
+                  : 'text-white fill-white/10'
+              }`}
+            />
+          </div>
+          <span className="text-xs font-bold text-white drop-shadow">
+            {formatNumber(totalLikes)}
+          </span>
+        </button>
+
+        {/* Комментарии */}
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            onOpenComments(video.id);
+          }}
+          className="flex flex-col items-center gap-1 group"
+        >
+          <div className="p-2 rounded-full bg-black/30 backdrop-blur-sm group-active:scale-110 transition-transform">
+            <MessageCircle className="w-8 h-8 text-white fill-white/15" />
+          </div>
+          <span className="text-xs font-bold text-white drop-shadow">
+            {formatNumber((video.comments || []).length)}
+          </span>
+        </button>
+
+        {/* Поделиться */}
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            onShare(video);
+          }}
+          className="flex flex-col items-center gap-1 group"
+        >
+          <div className="p-2 rounded-full bg-black/30 backdrop-blur-sm group-active:scale-110 transition-transform">
+            <Share2 className="w-7 h-7 text-white" />
+          </div>
+          <span className="text-xs font-bold text-white drop-shadow">
+            {formatNumber(video.sharesCount || 0)}
+          </span>
+        </button>
+
+        {/* Пластинка */}
+        <div
+          onClick={(e) => {
+            e.stopPropagation();
+            onToggleMute();
+          }}
+          className={`mt-1 w-11 h-11 rounded-full bg-gradient-to-tr from-neutral-900 via-neutral-700 to-neutral-900 border-4 border-neutral-800 flex items-center justify-center shadow-xl cursor-pointer ${
+            isPlaying && isActive ? 'animate-spin' : ''
+          }`}
+          style={{ animationDuration: '4s' }}
+        >
+          <div className="w-5 h-5 rounded-full bg-gradient-to-r from-[#FE2C55] to-[#25F4EE] flex items-center justify-center text-[10px]">
+            🎵
+          </div>
+        </div>
+      </div>
+
+      {/* Нижняя информация об авторе и описании */}
+      <div className="absolute left-3.5 right-20 bottom-16 z-20 text-left pointer-events-none">
+        <div className="flex flex-wrap items-center gap-1.5 mb-1.5 pointer-events-auto">
+          <span className="font-extrabold text-white text-base drop-shadow">
+            @{video.authorUsername}
+          </span>
+          {isOwnVideo ? (
+            <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-full bg-[#25F4EE]/25 text-[#25F4EE] border border-[#25F4EE]/50">
+              Вы
+            </span>
+          ) : !video.isProcedural ? (
+            <span className="flex items-center gap-1 text-[10px] font-bold uppercase px-2 py-0.5 rounded-full bg-emerald-500/25 text-emerald-300 border border-emerald-400/40">
+              <Globe className="w-2.5 h-2.5" /> Реальный автор
+            </span>
+          ) : null}
+        </div>
+
+        <p className="text-sm text-white/95 leading-snug mb-2 line-clamp-3 drop-shadow">
+          {video.description}
+        </p>
+
+        {video.hashtags && video.hashtags.length > 0 && (
+          <div className="flex flex-wrap gap-1.5 mb-2.5">
+            {video.hashtags.map((tag, idx) => (
+              <span key={idx} className="text-xs font-bold text-[#25F4EE] drop-shadow">
+                #{tag.replace(/^#/, '')}
+              </span>
+            ))}
+          </div>
+        )}
+
+        <div className="flex items-center gap-2 text-xs text-white/90 bg-black/35 backdrop-blur-sm px-2.5 py-1 rounded-full w-fit max-w-full overflow-hidden">
+          <Music className="w-3.5 h-3.5 text-[#FE2C55] shrink-0 animate-pulse" />
+          <div className="overflow-hidden whitespace-nowrap">
+            <span className="inline-block animate-marquee font-medium">
+              {video.musicTitle || 'Оригинальный звук — ТикТак'}
+            </span>
+          </div>
+        </div>
+      </div>
+
+      {/* Прогресс-бар */}
+      <div className="absolute inset-x-0 bottom-[56px] h-[3px] bg-white/20 z-30">
+        <div
+          className="h-full bg-gradient-to-r from-[#25F4EE] via-white to-[#FE2C55] transition-all duration-100"
+          style={{ width: `${Math.min(100, progress)}%` }}
+        />
+      </div>
+    </div>
+  );
+}
+
+// ============================================================================
+// СТУДИЯ СОЗДАНИЯ И ОБЛАЧНОЙ ПУБЛИКАЦИИ РОЛИКА
+// ============================================================================
+function CreateStudioModal({ isOpen, onClose, onPublish, currentUser }) {
+  const [mode, setMode] = useState('studio'); // 'studio' | 'upload'
+  const [themeId, setThemeId] = useState(VISUAL_THEMES[0].id);
+  const [musicId, setMusicId] = useState(MUSIC_TRACKS[0].id);
+  const [overlayTitle, setOverlayTitle] = useState('КОГДА ЗАШЁЛ В ТИКТАК НА 5 МИНУТ');
+  const [overlaySubtitle, setOverlaySubtitle] = useState('А прошло уже 3 часа ночи 😅');
+  const [sticker, setSticker] = useState('🔥');
+  const [description, setDescription] = useState('');
+  const [hashtagsText, setHashtagsText] = useState('тиктак, тренды, жиза, рек');
+  const [uploadedFile, setUploadedFile] = useState(null);
+  const [uploadedPreviewUrl, setUploadedPreviewUrl] = useState(null);
+  const [uploadedType, setUploadedType] = useState(null); // 'video' | 'image'
+  const [isPublishing, setIsPublishing] = useState(false);
+
+  if (!isOpen) return null;
+
+  const handleFileChange = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const isVideo = file.type.startsWith('video/');
+    const isImage = file.type.startsWith('image/');
+    if (!isVideo && !isImage) return;
+
+    if (uploadedPreviewUrl) {
+      URL.revokeObjectURL(uploadedPreviewUrl);
+    }
+
+    const url = URL.createObjectURL(file);
+    setUploadedFile(file);
+    setUploadedPreviewUrl(url);
+    setUploadedType(isVideo ? 'video' : 'image');
+    setMode('upload');
+  };
+
+  const handleCreate = async (e) => {
+    e.preventDefault();
+    if (isPublishing) return;
+    setIsPublishing(true);
+
+    const id = 'cloud_vid_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7);
+    const selectedMusic = MUSIC_TRACKS.find((m) => m.id === musicId) || MUSIC_TRACKS[0];
+
+    let imageDataUrl = null;
+    let hasLocalVideo = false;
+
+    if (mode === 'upload' && uploadedFile) {
+      if (uploadedType === 'image') {
+        imageDataUrl = await compressImageFileToDataUrl(uploadedFile, 540, 0.72);
+      } else if (uploadedType === 'video') {
+        // Сохраняем видеофайл локально для автора + создаем облачный постер-кадр для всех остальных пользователей
+        await saveLocalVideoBlob(id, uploadedFile);
+        hasLocalVideo = true;
+        imageDataUrl = await extractVideoPosterDataUrl(uploadedFile);
+      }
+    }
+
+    const parsedTags = hashtagsText
+      .split(/[\s,]+/)
+      .map((t) => t.replace(/^#/, '').trim())
+      .filter(Boolean);
+
+    const newVideo = {
+      id,
+      isProcedural: false,
+      authorId: currentUser.id,
+      authorName: currentUser.name,
+      authorUsername: currentUser.username,
+      authorAvatar: currentUser.avatar,
+      description:
+        description.trim() ||
+        'Всем привет! Зацените мой новый ролик в ТикТак 🔥🎬',
+      hashtags: parsedTags.length > 0 ? parsedTags : ['тиктак', 'новинка'],
+      category: 'user_created',
+      mediaType: mode === 'upload' && uploadedFile ? uploadedType : 'generated',
+      imageDataUrl,
+      hasLocalVideo,
+      musicId: selectedMusic.id,
+      musicTitle: selectedMusic.title,
+      themeId,
+      overlayTitle: overlayTitle.trim(),
+      overlaySubtitle: overlaySubtitle.trim(),
+      sticker,
+      baseLikes: 0,
+      likedBy: [currentUser.id],
+      sharesCount: 0,
+      createdAt: Date.now(),
+      comments: []
+    };
+
+    await onPublish(newVideo, hasLocalVideo ? uploadedPreviewUrl : null);
+    setIsPublishing(false);
+    onClose();
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/95 backdrop-blur-xl flex flex-col max-w-md mx-auto border-x border-white/10">
+      <div className="flex items-center justify-between px-4 py-3.5 border-b border-white/10 bg-neutral-950">
+        <button
+          onClick={onClose}
+          className="p-2 rounded-full bg-white/10 text-white hover:bg-white/20 transition"
+        >
+          <X className="w-5 h-5" />
+        </button>
+        <div className="flex items-center gap-2">
+          <Sparkles className="w-5 h-5 text-[#25F4EE]" />
+          <h2 className="font-extrabold text-white text-base">Публикация в эфир</h2>
+        </div>
+        <button
+          onClick={handleCreate}
+          disabled={isPublishing}
+          className="px-4 py-1.5 rounded-full bg-gradient-to-r from-[#FE2C55] to-rose-600 text-white text-sm font-bold shadow-lg shadow-[#FE2C55]/30 hover:brightness-110 active:scale-95 transition disabled:opacity-50"
+        >
+          {isPublishing ? 'Отправка...' : 'Выложить'}
+        </button>
+      </div>
+
+      {/* Переключатель режима */}
+      <div className="grid grid-cols-2 gap-2 p-3 bg-neutral-900/70 border-b border-white/10">
+        <button
+          type="button"
+          onClick={() => setMode('studio')}
+          className={`flex items-center justify-center gap-2 py-2 rounded-xl text-xs font-bold transition ${
+            mode === 'studio'
+              ? 'bg-white text-black shadow'
+              : 'bg-white/5 text-neutral-400 hover:text-white'
+          }`}
+        >
+          <Palette className="w-4 h-4" />
+          Конструктор ролика
+        </button>
+
+        <label
+          className={`flex items-center justify-center gap-2 py-2 rounded-xl text-xs font-bold cursor-pointer transition ${
+            mode === 'upload'
+              ? 'bg-[#25F4EE] text-black shadow'
+              : 'bg-white/5 text-neutral-400 hover:text-white'
+          }`}
+        >
+          <Upload className="w-4 h-4" />
+          Загрузить видео/фото
+          <input
+            type="file"
+            accept="video/*,image/*"
+            onChange={handleFileChange}
+            className="hidden"
+          />
+        </label>
+      </div>
+
+      <div className="flex-1 overflow-y-auto p-4 space-y-5">
+        {/* Превью */}
+        <div className="relative w-52 h-80 mx-auto rounded-2xl overflow-hidden border-2 border-white/20 shadow-2xl bg-black">
+          {mode === 'upload' && uploadedPreviewUrl ? (
+            uploadedType === 'video' ? (
+              <video
+                src={uploadedPreviewUrl}
+                autoPlay
+                loop
+                muted
+                playsInline
+                className="w-full h-full object-cover"
+              />
+            ) : (
+              <img
+                src={uploadedPreviewUrl}
+                alt="Превью"
+                className="w-full h-full object-cover"
+              />
+            )
+          ) : (
+            <AnimatedVideoCanvas
+              themeId={themeId}
+              isPlaying={true}
+              overlayTitle={overlayTitle}
+              overlaySubtitle={overlaySubtitle}
+              sticker={sticker}
+            />
+          )}
+
+          {mode === 'upload' && (overlayTitle || sticker) && (
+            <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none p-3 text-center">
+              {sticker && <div className="text-4xl mb-2">{sticker}</div>}
+              {overlayTitle && (
+                <div className="bg-black/70 px-2.5 py-1 rounded-lg text-white font-black text-xs uppercase">
+                  {overlayTitle}
+                </div>
+              )}
+            </div>
+          )}
+
+          <div className="absolute top-2 left-2 px-2 py-0.5 rounded-md bg-emerald-500/90 text-[10px] font-bold text-black flex items-center gap-1">
+            <Globe className="w-2.5 h-2.5" /> Увидят все
+          </div>
+        </div>
+
+        {mode === 'studio' && (
+          <div>
+            <label className="block text-xs font-bold text-neutral-400 uppercase mb-2">
+              1. Анимированный фон и вайб
+            </label>
+            <div className="grid grid-cols-2 gap-2">
+              {VISUAL_THEMES.map((theme) => (
+                <button
+                  key={theme.id}
+                  type="button"
+                  onClick={() => setThemeId(theme.id)}
+                  className={`flex items-center gap-2.5 p-2.5 rounded-xl border text-left transition ${
+                    themeId === theme.id
+                      ? 'border-[#25F4EE] bg-white/10 text-white'
+                      : 'border-white/10 bg-neutral-900 text-neutral-400'
+                  }`}
+                >
+                  <div
+                    className={`w-6 h-6 rounded-full bg-gradient-to-br ${theme.gradient} shrink-0 border border-white/30`}
+                  />
+                  <span className="text-xs font-semibold truncate">{theme.name}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <div className="space-y-3">
+          <label className="block text-xs font-bold text-neutral-400 uppercase">
+            2. Текст / Мем поверх ролика
+          </label>
+          <input
+            type="text"
+            value={overlayTitle}
+            onChange={(e) => setOverlayTitle(e.target.value)}
+            placeholder="Крупный заголовок на экране..."
+            maxLength={60}
+            className="w-full px-3.5 py-2.5 rounded-xl bg-neutral-900 border border-white/15 text-white text-sm focus:outline-none focus:border-[#25F4EE]"
+          />
+          {mode === 'studio' && (
+            <input
+              type="text"
+              value={overlaySubtitle}
+              onChange={(e) => setOverlaySubtitle(e.target.value)}
+              placeholder="Подпись снизу (необязательно)..."
+              maxLength={70}
+              className="w-full px-3.5 py-2 rounded-xl bg-neutral-900 border border-white/15 text-white text-xs focus:outline-none focus:border-[#25F4EE]"
+            />
+          )}
+        </div>
+
+        <div>
+          <label className="block text-xs font-bold text-neutral-400 uppercase mb-2">
+            3. Анимированный стикер
+          </label>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => setSticker('')}
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold border ${
+                sticker === ''
+                  ? 'border-[#FE2C55] bg-[#FE2C55]/20 text-white'
+                  : 'border-white/10 bg-neutral-900 text-neutral-400'
+              }`}
+            >
+              Без
+            </button>
+            {STICKER_OPTIONS.map((st) => (
+              <button
+                key={st}
+                type="button"
+                onClick={() => setSticker(st)}
+                className={`w-9 h-9 rounded-xl text-lg flex items-center justify-center border transition ${
+                  sticker === st
+                    ? 'border-[#25F4EE] bg-[#25F4EE]/20 scale-110'
+                    : 'border-white/10 bg-neutral-900 hover:bg-neutral-800'
+                }`}
+              >
+                {st}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div>
+          <label className="block text-xs font-bold text-neutral-400 uppercase mb-2">
+            4. Фоновый звук / Бит
+          </label>
+          <select
+            value={musicId}
+            onChange={(e) => setMusicId(e.target.value)}
+            className="w-full px-3.5 py-2.5 rounded-xl bg-neutral-900 border border-white/15 text-white text-xs font-medium focus:outline-none focus:border-[#25F4EE]"
+          >
+            {MUSIC_TRACKS.map((track) => (
+              <option key={track.id} value={track.id}>
+                🎵 {track.title}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div className="space-y-3 pb-6">
+          <label className="block text-xs font-bold text-neutral-400 uppercase">
+            5. Описание и хэштеги
+          </label>
+          <textarea
+            rows={2}
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            placeholder="Расскажите всем, о чём этот ролик..."
+            className="w-full px-3.5 py-2.5 rounded-xl bg-neutral-900 border border-white/15 text-white text-sm focus:outline-none focus:border-[#FE2C55]"
+          />
+          <input
+            type="text"
+            value={hashtagsText}
+            onChange={(e) => setHashtagsText(e.target.value)}
+            placeholder="Хэштеги через запятую: юмор, рек, кот"
+            className="w-full px-3.5 py-2 rounded-xl bg-neutral-900 border border-white/15 text-[#25F4EE] text-xs font-medium focus:outline-none focus:border-[#25F4EE]"
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================================
+// ШТОРКА КОММЕНТАРИЕВ В РЕАЛЬНОМ ВРЕМЕНИ
+// ============================================================================
+function CommentsDrawer({ video, onClose, onAddComment, onToggleCommentLike, currentUser }) {
+  const [text, setText] = useState('');
+  const [replyTo, setReplyTo] = useState(null);
+
+  if (!video) return null;
+
+  const comments = video.comments || [];
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    if (!text.trim()) return;
+    const finalText = replyTo ? `@${replyTo} ${text.trim()}` : text.trim();
+    onAddComment(video, finalText);
+    setText('');
+    setReplyTo(null);
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex flex-col justify-end max-w-md mx-auto">
+      <div
+        onClick={onClose}
+        className="absolute inset-0 bg-black/65 backdrop-blur-xs transition-opacity"
+      />
+
+      <div className="relative z-10 bg-neutral-900 rounded-t-3xl border-t border-white/15 h-[72%] flex flex-col shadow-2xl">
+        <div className="flex items-center justify-between px-5 py-3.5 border-b border-white/10">
+          <div className="w-6" />
+          <span className="text-sm font-extrabold text-white">
+            Комментарии ({comments.length})
+          </span>
+          <button
+            onClick={onClose}
+            className="p-1.5 rounded-full bg-white/10 text-neutral-300 hover:text-white"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-4 space-y-4">
+          {comments.length === 0 ? (
+            <div className="h-full flex flex-col items-center justify-center text-neutral-500 text-sm">
+              <MessageCircle className="w-10 h-10 mb-2 opacity-40" />
+              <p>Пока нет комментариев. Напишите первым!</p>
+            </div>
+          ) : (
+            comments.map((c) => {
+              const cLiked = Array.isArray(c.likedBy) && c.likedBy.includes(currentUser.id);
+              const cLikesCount = (c.likes || 0) + (Array.isArray(c.likedBy) ? c.likedBy.length : 0);
+              return (
+                <div key={c.id} className="flex items-start gap-3">
+                  <div className="w-9 h-9 rounded-full bg-neutral-800 border border-white/10 flex items-center justify-center text-lg shrink-0">
+                    {c.authorAvatar}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-bold text-neutral-300">{c.authorName}</span>
+                      <span className="text-[10px] text-neutral-500">{c.time || 'Недавно'}</span>
+                    </div>
+                    <p className="text-sm text-white mt-0.5 break-words leading-snug">{c.text}</p>
+                    <button
+                      onClick={() => setReplyTo(c.authorName)}
+                      className="mt-1 text-[11px] font-semibold text-neutral-400 hover:text-[#25F4EE]"
+                    >
+                      Ответить
+                    </button>
+                  </div>
+                  <button
+                    onClick={() => onToggleCommentLike(video, c.id)}
+                    className="flex flex-col items-center gap-0.5 pt-1 text-neutral-400 hover:text-[#FE2C55]"
+                  >
+                    <Heart
+                      className={`w-4 h-4 ${
+                        cLiked ? 'text-[#FE2C55] fill-[#FE2C55]' : ''
+                      }`}
+                    />
+                    <span className="text-[10px] font-semibold">{cLikesCount}</span>
+                  </button>
+                </div>
+              );
+            })
+          )}
+        </div>
+
+        <div className="px-4 py-2 border-t border-white/5 flex items-center justify-between bg-neutral-950/60">
+          {['😂', '🔥', '❤️', '👏', '😍', '🤯', '💀'].map((emoji) => (
+            <button
+              key={emoji}
+              type="button"
+              onClick={() => setText((prev) => prev + emoji)}
+              className="text-xl hover:scale-125 transition-transform"
+            >
+              {emoji}
+            </button>
+          ))}
+        </div>
+
+        <form
+          onSubmit={handleSubmit}
+          className="p-3 bg-neutral-950 border-t border-white/10 flex items-center gap-2.5"
+        >
+          <div className="w-8 h-8 rounded-full bg-neutral-800 flex items-center justify-center text-base shrink-0">
+            {currentUser.avatar}
+          </div>
+          <div className="flex-1 relative">
+            {replyTo && (
+              <div className="absolute -top-6 left-2 text-[10px] bg-[#25F4EE]/20 text-[#25F4EE] px-2 py-0.5 rounded flex items-center gap-1">
+                Ответ для {replyTo}
+                <button type="button" onClick={() => setReplyTo(null)}>
+                  <X className="w-3 h-3" />
+                </button>
+              </div>
+            )}
+            <input
+              type="text"
+              value={text}
+              onChange={(e) => setText(e.target.value)}
+              placeholder="Написать комментарий в общий чат..."
+              className="w-full bg-neutral-900 border border-white/15 rounded-full px-4 py-2 text-sm text-white placeholder-neutral-500 focus:outline-none focus:border-[#25F4EE]"
+            />
+          </div>
+          <button
+            type="submit"
+            disabled={!text.trim()}
+            className="p-2.5 rounded-full bg-[#FE2C55] text-white disabled:opacity-40 hover:brightness-110 active:scale-95 transition"
+          >
+            <Send className="w-4 h-4" />
+          </button>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================================
+// ЭКРАН ПОИСКА И ТРЕНДОВ
+// ============================================================================
+function SearchTrendsView({ allVideos, onSelectVideo, localVideoUrls, onToggleFollow, user }) {
+  const [query, setQuery] = useState('');
+  const [selectedTag, setSelectedTag] = useState('все');
+
+  const popularTags = ['все', 'жиза', 'юмор', 'айти', 'кот', 'еда', 'авто', 'эстетика'];
+
+  const filteredVideos = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return allVideos.filter((v) => {
+      const matchesTag =
+        selectedTag === 'все' ||
+        (v.hashtags && v.hashtags.some((t) => t.toLowerCase().includes(selectedTag)));
+
+      if (!matchesTag) return false;
+      if (!q) return true;
+
+      return (
+        (v.description && v.description.toLowerCase().includes(q)) ||
+        (v.overlayTitle && v.overlayTitle.toLowerCase().includes(q)) ||
+        (v.authorName && v.authorName.toLowerCase().includes(q)) ||
+        (v.authorUsername && v.authorUsername.toLowerCase().includes(q)) ||
+        (v.hashtags && v.hashtags.some((t) => t.toLowerCase().includes(q)))
+      );
+    });
+  }, [allVideos, query, selectedTag]);
+
+  return (
+    <div className="h-full overflow-y-auto bg-neutral-950 text-white pb-24">
+      <div className="sticky top-0 z-20 bg-neutral-950/95 backdrop-blur-md p-4 border-b border-white/10 space-y-3">
+        <div className="relative">
+          <Search className="w-4 h-4 text-neutral-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+          <input
+            type="text"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Поиск по авторам, хэштегам и мемам..."
+            className="w-full pl-10 pr-9 py-2.5 rounded-full bg-neutral-900 border border-white/15 text-sm text-white placeholder-neutral-500 focus:outline-none focus:border-[#25F4EE]"
+          />
+          {query && (
+            <button
+              onClick={() => setQuery('')}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-400 hover:text-white"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          )}
+        </div>
+
+        {/* Популярные хэштеги */}
+        <div className="flex gap-2 overflow-x-auto no-scrollbar pb-1">
+          {popularTags.map((tag) => (
+            <button
+              key={tag}
+              onClick={() => setSelectedTag(tag)}
+              className={`px-3.5 py-1.5 rounded-full text-xs font-bold whitespace-nowrap transition ${
+                selectedTag === tag
+                  ? 'bg-[#FE2C55] text-white shadow'
+                  : 'bg-neutral-900 text-neutral-400 border border-white/10 hover:text-white'
+              }`}
+            >
+              {tag === 'все' ? '🔥 Все тренды' : `#${tag}`}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Сетка найденных роликов */}
+      <div className="p-3">
+        <div className="flex items-center justify-between mb-3 px-1">
+          <span className="text-xs font-extrabold uppercase tracking-wider text-neutral-400 flex items-center gap-1.5">
+            <Flame className="w-4 h-4 text-[#FE2C55]" /> Найдено роликов: {filteredVideos.length}
+          </span>
+        </div>
+
+        {filteredVideos.length === 0 ? (
+          <div className="py-16 text-center text-neutral-500">
+            <p className="text-3xl mb-2">🔍</p>
+            <p className="text-sm font-semibold">Ничего не найдено по вашему запросу</p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-2 gap-2.5">
+            {filteredVideos.slice(0, 40).map((vid) => {
+              const theme = VISUAL_THEMES.find((t) => t.id === vid.themeId) || VISUAL_THEMES[0];
+              const vUrl = localVideoUrls[vid.id];
+              const likes =
+                (vid.baseLikes || 0) + (Array.isArray(vid.likedBy) ? vid.likedBy.length : 0);
+
+              return (
+                <div
+                  key={vid.id}
+                  onClick={() => onSelectVideo(vid.id)}
+                  className="relative aspect-[3/4] rounded-2xl overflow-hidden bg-neutral-900 border border-white/10 cursor-pointer group"
+                >
+                  {vUrl ? (
+                    <video src={vUrl} muted className="w-full h-full object-cover" />
+                  ) : vid.imageDataUrl ? (
+                    <img src={vid.imageDataUrl} alt="" className="w-full h-full object-cover" />
+                  ) : (
+                    <div
+                      className={`w-full h-full bg-gradient-to-br ${theme.gradient} flex flex-col items-center justify-center p-3 text-center`}
+                    >
+                      <span className="text-3xl mb-2">{vid.sticker || '🎬'}</span>
+                      <span className="text-[11px] font-black text-white uppercase line-clamp-3 leading-tight">
+                        {vid.overlayTitle || vid.description}
+                      </span>
+                    </div>
+                  )}
+
+                  <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-transparent to-black/30" />
+
+                  {!vid.isProcedural && (
+                    <div className="absolute top-2 left-2 px-2 py-0.5 rounded-full bg-emerald-500/90 text-[9px] font-extrabold text-black flex items-center gap-1">
+                      <Globe className="w-2.5 h-2.5" /> Live
+                    </div>
+                  )}
+
+                  <div className="absolute bottom-2 inset-x-2">
+                    <p className="text-[11px] font-bold text-white truncate">
+                      @{vid.authorUsername}
+                    </p>
+                    <div className="flex items-center justify-between text-[10px] text-neutral-300 mt-0.5">
+                      <span className="flex items-center gap-1">
+                        <Heart className="w-3 h-3 text-[#FE2C55] fill-[#FE2C55]" /> {likes}
+                      </span>
+                      <span className="flex items-center gap-1">
+                        <MessageCircle className="w-3 h-3" /> {(vid.comments || []).length}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ============================================================================
+// ЭКРАН ВХОДЯЩИХ УВЕДОМЛЕНИЙ И АКТИВНОСТИ
+// ============================================================================
+function InboxActivityView({ myVideos, onlineUsersCount, onSelectVideo }) {
+  // Собираем реальные комментарии и лайки на ваши ролики
+  const notifications = useMemo(() => {
+    const items = [];
+    myVideos.forEach((vid) => {
+      (vid.comments || []).forEach((c) => {
+        items.push({
+          id: 'notif_c_' + c.id,
+          type: 'comment',
+          avatar: c.authorAvatar,
+          title: `${c.authorName} прокомментировал(а) ваш ролик`,
+          subtitle: `«${c.text}»`,
+          time: c.time || 'Недавно',
+          videoId: vid.id
+        });
+      });
+
+      const otherLikesCount = Array.isArray(vid.likedBy) ? vid.likedBy.length : 0;
+      if (otherLikesCount > 0) {
+        items.push({
+          id: 'notif_l_' + vid.id,
+          type: 'like',
+          avatar: '❤️',
+          title: `Ваш ролик оценили (${otherLikesCount})`,
+          subtitle: vid.overlayTitle || vid.description,
+          time: 'В реальном времени',
+          videoId: vid.id
+        });
+      }
+    });
+    return items;
+  }, [myVideos]);
+
+  return (
+    <div className="h-full overflow-y-auto bg-neutral-950 text-white pb-24">
+      <div className="sticky top-0 z-20 bg-neutral-950/95 backdrop-blur-md px-4 py-3.5 border-b border-white/10 flex items-center justify-between">
+        <h1 className="font-extrabold text-base">Входящие</h1>
+        <span className="flex items-center gap-1.5 text-xs font-bold text-emerald-400 bg-emerald-500/15 px-2.5 py-1 rounded-full border border-emerald-500/30">
+          <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
+          Онлайн: {onlineUsersCount}
+        </span>
+      </div>
+
+      <div className="p-4 space-y-3">
+        <div className="p-3.5 rounded-2xl bg-gradient-to-r from-[#FE2C55]/20 to-[#25F4EE]/20 border border-white/10 flex items-center gap-3">
+          <div className="w-10 h-10 rounded-full bg-black/50 flex items-center justify-center text-xl">
+            🌐
+          </div>
+          <div>
+            <p className="text-xs font-extrabold text-white">Общий эфир активен</p>
+            <p className="text-[11px] text-neutral-300">
+              Все новые ролики, лайки и комментарии синхронизируются между пользователями мгновенно!
+            </p>
+          </div>
+        </div>
+
+        {notifications.length === 0 ? (
+          <div className="py-16 text-center text-neutral-500">
+            <Bell className="w-10 h-10 mx-auto mb-3 opacity-40" />
+            <p className="text-sm font-semibold text-neutral-400">Пока нет новых уведомлений</p>
+            <p className="text-xs mt-1 max-w-xs mx-auto">
+              Выложите ролик через кнопку «+», чтобы другие пользователи могли его лайкать и комментировать!
+            </p>
+          </div>
+        ) : (
+          notifications.map((item) => (
+            <div
+              key={item.id}
+              onClick={() => onSelectVideo(item.videoId)}
+              className="flex items-center gap-3 p-3 rounded-2xl bg-neutral-900/80 border border-white/10 hover:bg-neutral-900 cursor-pointer transition"
+            >
+              <div className="w-11 h-11 rounded-full bg-neutral-800 flex items-center justify-center text-xl shrink-0">
+                {item.avatar}
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-xs font-bold text-white">{item.title}</p>
+                <p className="text-xs text-neutral-400 truncate mt-0.5">{item.subtitle}</p>
+                <span className="text-[10px] text-[#25F4EE] mt-0.5 block">{item.time}</span>
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ============================================================================
+// ЭКРАН ПРОФИЛЯ ПОЛЬЗОВАТЕЛЯ
+// ============================================================================
+function ProfileView({
+  user,
+  onUpdateUser,
+  myVideos,
+  likedVideos,
+  onSelectVideo,
+  onDeleteVideo,
+  localVideoUrls,
+  onCopyInviteLink
+}) {
+  const [profileTab, setProfileTab] = useState('my'); // 'my' | 'liked'
+  const [isEditing, setIsEditing] = useState(false);
+  const [editName, setEditName] = useState(user.name);
+  const [editUsername, setEditUsername] = useState(user.username);
+  const [editBio, setEditBio] = useState(user.bio);
+  const [editAvatar, setEditAvatar] = useState(user.avatar);
+
+  const totalLikesReceived = useMemo(() => {
+    return myVideos.reduce(
+      (acc, v) => acc + (v.baseLikes || 0) + (Array.isArray(v.likedBy) ? v.likedBy.length : 0),
+      0
+    );
+  }, [myVideos]);
+
+  const handleSaveProfile = (e) => {
+    e.preventDefault();
+    onUpdateUser({
+      ...user,
+      name: editName.trim() || user.name,
+      username: editUsername.trim().replace(/[^a-zA-Z0-9_а-яА-ЯёЁ]/g, '') || user.username,
+      bio: editBio.trim(),
+      avatar: editAvatar
+    });
+    setIsEditing(false);
+  };
+
+  const displayedVideos = profileTab === 'my' ? myVideos : likedVideos;
+
+  return (
+    <div className="h-full overflow-y-auto bg-neutral-950 text-white pb-24">
+      <div className="sticky top-0 z-20 bg-neutral-950/90 backdrop-blur-md border-b border-white/10 px-4 py-3 flex items-center justify-between">
+        <button
+          onClick={onCopyInviteLink}
+          className="px-2.5 py-1 rounded-full bg-[#25F4EE]/15 border border-[#25F4EE]/40 text-[#25F4EE] text-[11px] font-bold flex items-center gap-1 hover:bg-[#25F4EE]/25 transition"
+          title="Позвать друга в ТикТак"
+        >
+          <Users className="w-3.5 h-3.5" /> Позвать друга
+        </button>
+
+        <h1 className="font-extrabold text-base truncate max-w-[150px]">{user.name}</h1>
+
+        <button
+          onClick={() => {
+            setEditName(user.name);
+            setEditUsername(user.username);
+            setEditBio(user.bio);
+            setEditAvatar(user.avatar);
+            setIsEditing(true);
+          }}
+          className="p-2 rounded-full bg-white/10 hover:bg-white/20 text-white transition"
+          title="Редактировать профиль"
+        >
+          <Edit3 className="w-4 h-4" />
+        </button>
+      </div>
+
+      <div className="flex flex-col items-center pt-6 pb-5 px-6 text-center">
+        <div className="w-24 h-24 rounded-full bg-gradient-to-tr from-[#FE2C55] via-purple-500 to-[#25F4EE] p-1 shadow-xl mb-3">
+          <div className="w-full h-full rounded-full bg-neutral-900 flex items-center justify-center text-5xl">
+            {user.avatar}
+          </div>
+        </div>
+
+        <p className="text-sm font-bold text-neutral-300">@{user.username}</p>
+        <p className="text-[10px] text-neutral-500 mt-0.5 font-mono">ID: {user.id}</p>
+
+        <div className="flex items-center justify-center gap-7 my-4">
+          <div className="flex flex-col items-center">
+            <span className="text-lg font-black text-white">{(user.followingIds || []).length}</span>
+            <span className="text-xs text-neutral-400">Подписки</span>
+          </div>
+          <div className="h-6 w-[1px] bg-white/10" />
+          <div className="flex flex-col items-center">
+            <span className="text-lg font-black text-white">{18 + myVideos.length * 9}</span>
+            <span className="text-xs text-neutral-400">Подписчики</span>
+          </div>
+          <div className="h-6 w-[1px] bg-white/10" />
+          <div className="flex flex-col items-center">
+            <span className="text-lg font-black text-white">{totalLikesReceived}</span>
+            <span className="text-xs text-neutral-400">Лайки</span>
+          </div>
+        </div>
+
+        <p className="text-xs sm:text-sm text-neutral-300 max-w-xs leading-relaxed">
+          {user.bio || 'Снимаю топовый контент в ТикТак ✨'}
+        </p>
+
+        <button
+          onClick={() => setIsEditing(true)}
+          className="mt-4 px-6 py-2 rounded-xl bg-white/10 hover:bg-white/15 border border-white/15 text-xs font-bold transition"
+        >
+          Настроить профиль
+        </button>
+      </div>
+
+      {/* Вкладки профиля */}
+      <div className="grid grid-cols-2 border-y border-white/10 sticky top-[53px] z-10 bg-neutral-950">
+        <button
+          onClick={() => setProfileTab('my')}
+          className={`py-3 flex items-center justify-center gap-2 text-xs font-bold border-b-2 transition ${
+            profileTab === 'my'
+              ? 'border-[#FE2C55] text-white'
+              : 'border-transparent text-neutral-500 hover:text-neutral-300'
+          }`}
+        >
+          <Film className="w-4 h-4" />
+          Мои видео ({myVideos.length})
+        </button>
+        <button
+          onClick={() => setProfileTab('liked')}
+          className={`py-3 flex items-center justify-center gap-2 text-xs font-bold border-b-2 transition ${
+            profileTab === 'liked'
+              ? 'border-[#25F4EE] text-white'
+              : 'border-transparent text-neutral-500 hover:text-neutral-300'
+          }`}
+        >
+          <Heart className="w-4 h-4" />
+          Понравившиеся ({likedVideos.length})
+        </button>
+      </div>
+
+      {displayedVideos.length === 0 ? (
+        <div className="py-16 px-6 text-center text-neutral-500">
+          <div className="text-4xl mb-3">{profileTab === 'my' ? '🎬' : '💔'}</div>
+          <p className="text-sm font-semibold text-neutral-400">
+            {profileTab === 'my'
+              ? 'Вы ещё не выпустили ни одного ролика'
+              : 'Вы пока не лайкнули ни одного видео'}
+          </p>
+          <p className="text-xs mt-1">
+            {profileTab === 'my'
+              ? 'Нажмите «+» внизу экрана, чтобы выложить свой ролик для всех!'
+              : 'Дважды тапните по любому ролику в ленте'}
+          </p>
+        </div>
+      ) : (
+        <div className="grid grid-cols-3 gap-0.5 p-0.5">
+          {displayedVideos.map((vid) => {
+            const theme = VISUAL_THEMES.find((t) => t.id === vid.themeId) || VISUAL_THEMES[0];
+            const vUrl = localVideoUrls[vid.id];
+            const likesCount =
+              (vid.baseLikes || 0) + (Array.isArray(vid.likedBy) ? vid.likedBy.length : 0);
+
+            return (
+              <div
+                key={vid.id}
+                onClick={() => onSelectVideo(vid.id)}
+                className="relative aspect-[3/4] bg-neutral-900 overflow-hidden cursor-pointer group"
+              >
+                {vUrl ? (
+                  <video src={vUrl} muted className="w-full h-full object-cover" />
+                ) : vid.imageDataUrl ? (
+                  <img src={vid.imageDataUrl} alt="" className="w-full h-full object-cover" />
+                ) : (
+                  <div
+                    className={`w-full h-full bg-gradient-to-br ${theme.gradient} flex flex-col items-center justify-center p-2 text-center`}
+                  >
+                    <span className="text-2xl mb-1">{vid.sticker || '🎬'}</span>
+                    <span className="text-[9px] font-black text-white uppercase line-clamp-2 leading-tight">
+                      {vid.overlayTitle || vid.description}
+                    </span>
+                  </div>
+                )}
+
+                <div className="absolute inset-0 bg-black/20 group-hover:bg-black/40 transition" />
+
+                <div className="absolute bottom-1.5 left-1.5 flex items-center gap-1 text-[11px] font-bold text-white drop-shadow">
+                  <Play className="w-3 h-3 fill-white" />
+                  <span>{likesCount}</span>
+                </div>
+
+                {profileTab === 'my' && (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onDeleteVideo(vid.id);
+                    }}
+                    className="absolute top-1.5 right-1.5 p-1.5 rounded-full bg-black/60 text-rose-400 hover:bg-rose-600 hover:text-white transition"
+                    title="Удалить ролик из общего эфира"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {isEditing && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4 max-w-md mx-auto">
+          <form
+            onSubmit={handleSaveProfile}
+            className="w-full bg-neutral-900 border border-white/15 rounded-3xl p-5 space-y-4 shadow-2xl"
+          >
+            <div className="flex items-center justify-between">
+              <h3 className="font-extrabold text-white text-base">Настройка профиля</h3>
+              <button
+                type="button"
+                onClick={() => setIsEditing(false)}
+                className="p-1.5 rounded-full bg-white/10 text-neutral-400"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-neutral-400 mb-2">Аватар</label>
+              <div className="flex flex-wrap gap-2">
+                {AVATAR_OPTIONS.map((av) => (
+                  <button
+                    key={av}
+                    type="button"
+                    onClick={() => setEditAvatar(av)}
+                    className={`w-10 h-10 rounded-full text-xl flex items-center justify-center border transition ${
+                      editAvatar === av
+                        ? 'border-[#25F4EE] bg-[#25F4EE]/20 scale-110'
+                        : 'border-white/10 bg-neutral-800'
+                    }`}
+                  >
+                    {av}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-neutral-400 mb-1">Имя</label>
+              <input
+                type="text"
+                value={editName}
+                onChange={(e) => setEditName(e.target.value)}
+                className="w-full px-3.5 py-2 rounded-xl bg-neutral-950 border border-white/15 text-sm text-white"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-neutral-400 mb-1">Никнейм (@)</label>
+              <input
+                type="text"
+                value={editUsername}
+                onChange={(e) => setEditUsername(e.target.value)}
+                className="w-full px-3.5 py-2 rounded-xl bg-neutral-950 border border-white/15 text-sm text-[#25F4EE]"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-neutral-400 mb-1">О себе</label>
+              <textarea
+                rows={2}
+                value={editBio}
+                onChange={(e) => setEditBio(e.target.value)}
+                className="w-full px-3.5 py-2 rounded-xl bg-neutral-950 border border-white/15 text-sm text-white"
+              />
+            </div>
+
+            <button
+              type="submit"
+              className="w-full py-2.5 rounded-xl bg-gradient-to-r from-[#FE2C55] to-rose-600 font-bold text-sm text-white shadow-lg"
+            >
+              Сохранить в облако
+            </button>
+          </form>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ============================================================================
+// ГЛАВНЫЙ КОМПОНЕНТ ПРИЛОЖЕНИЯ «ТИКТАК» (MULTIPLAYER + INFINITE FEED)
+// ============================================================================
+export default function App() {
+  const [fbUser, setFbUser] = useState(null);
+  const [userProfile, setUserProfile] = useState(null);
+  const [cloudVideos, setCloudVideos] = useState([]);
+  const [proceduralVideos, setProceduralVideos] = useState(() => generateProceduralBatch(0, 10));
+  const [onlineProfilesCount, setOnlineProfilesCount] = useState(1);
+
+  const [activeNav, setActiveNav] = useState('feed'); // 'feed' | 'search' | 'inbox' | 'profile'
+  const [feedTab, setFeedTab] = useState('forYou'); // 'forYou' | 'following'
+  const [activeVideoIndex, setActiveVideoIndex] = useState(0);
+  const [isMuted, setIsMuted] = useState(true);
+  const [isCreateOpen, setIsCreateOpen] = useState(false);
+  const [activeCommentsVideoId, setActiveCommentsVideoId] = useState(null);
+  const [toastMessage, setToastMessage] = useState(null);
+  const [localVideoUrls, setLocalVideoUrls] = useState({});
+
+  const feedContainerRef = useRef(null);
+
+  const showToast = useCallback((msg) => {
+    setToastMessage(msg);
+    setTimeout(() => {
+      setToastMessage((prev) => (prev === msg ? null : prev));
+    }, 2700);
+  }, []);
+
+  // 1. АВТОРИЗАЦИЯ В FIREBASE (ОБЯЗАТЕЛЬНО ДО ЗАПРОСОВ К FIRESTORE)
+  useEffect(() => {
+    const initAuth = async () => {
+      try {
+        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+          await signInWithCustomToken(auth, __initial_auth_token);
+        } else {
+          await signInAnonymously(auth);
+        }
+      } catch (err) {
+        console.error('Ошибка входа в Firebase:', err);
+      }
+    };
+    initAuth();
+
+    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+      setFbUser(currentUser);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  // 2. ПОДПИСКА НА ОБЛАЧНЫЙ ПРОФИЛЬ ТЕКУЩЕГО ПОЛЬЗОВАТЕЛЯ И СПИСОК УЧАСТНИКОВ
+  useEffect(() => {
+    if (!fbUser) return;
+
+    const myProfileRef = doc(db, 'artifacts', appId, 'public', 'data', 'tiktak_profiles', fbUser.uid);
+
+    const unsubProfile = onSnapshot(
+      myProfileRef,
+      async (snap) => {
+        if (snap.exists()) {
+          setUserProfile(snap.data());
+        } else {
+          const shortCode = fbUser.uid.slice(0, 5);
+          const randomAvatar = AVATAR_OPTIONS[Math.floor(Math.random() * AVATAR_OPTIONS.length)];
+          const newProfile = {
+            id: fbUser.uid,
+            name: `Креатор_${shortCode}`,
+            username: `user_${shortCode.toLowerCase()}`,
+            avatar: randomAvatar,
+            bio: 'Снимаю ролики в общем эфире ТикТак 🚀✨',
+            followingIds: ['bot_barsik'],
+            updatedAt: Date.now()
+          };
+          await setDoc(myProfileRef, newProfile);
+          setUserProfile(newProfile);
+        }
+      },
+      (error) => {
+        console.error('Ошибка чтения профиля:', error);
+      }
+    );
+
+    const unsubAllProfiles = onSnapshot(
+      profilesCollectionRef,
+      (snapshot) => {
+        setOnlineProfilesCount(Math.max(1, snapshot.size));
+      },
+      () => {}
+    );
+
+    return () => {
+      unsubProfile();
+      unsubAllProfiles();
+    };
+  }, [fbUser]);
+
+  // 3. ПОДПИСКА НА ОБЩУЮ ОБЛАЧНУЮ КОЛЛЕКЦИЮ РОЛИКОВ В РЕАЛЬНОМ ВРЕМЕНИ
+  useEffect(() => {
+    if (!fbUser) return;
+
+    const unsubVideos = onSnapshot(
+      videosCollectionRef,
+      async (snapshot) => {
+        const fetched = [];
+        snapshot.forEach((docSnap) => {
+          fetched.push({ id: docSnap.id, ...docSnap.data() });
+        });
+
+        // Сортируем в памяти: самые свежие реальные посты сверху
+        fetched.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+        setCloudVideos(fetched);
+
+        // Подгружаем локальные видеофайлы из IndexedDB для тех роликов, которые сняты на этом устройстве
+        for (const vid of fetched) {
+          if (vid.hasLocalVideo) {
+            const blob = await loadLocalVideoBlob(vid.id);
+            if (blob) {
+              setLocalVideoUrls((prev) => {
+                if (prev[vid.id]) return prev;
+                return { ...prev, [vid.id]: URL.createObjectURL(blob) };
+              });
+            }
+          }
+        }
+      },
+      (error) => {
+        console.error('Ошибка синхронизации ленты:', error);
+      }
+    );
+
+    return () => unsubVideos();
+  }, [fbUser]);
+
+  // Остановка бита при переключении вкладки или открытии студии
+  useEffect(() => {
+    if (activeNav !== 'feed' || isCreateOpen) {
+      audioEngine.stopBeat();
+    }
+  }, [activeNav, isCreateOpen]);
+
+  // Объединяем реальные облачные ролики пользователей и бесконечные процедурные ролики
+  const combinedAllVideos = useMemo(() => {
+    // Чередуем реальные посты пользователей (в приоритете свежие) и процедурные рекомендации
+    if (cloudVideos.length === 0) return proceduralVideos;
+
+    const result = [];
+    const realCopy = [...cloudVideos];
+    const procCopy = [...proceduralVideos];
+
+    // Первые 3 самых свежих реальных ролика ставим сразу в начало ленты, чтобы их мгновенно видели все
+    while (realCopy.length > 0 && result.length < 3) {
+      result.push(realCopy.shift());
+    }
+
+    // Далее чередуем: 2 рекомендованных ролика -> 1 реальный ролик пользователя
+    while (realCopy.length > 0 || procCopy.length > 0) {
+      if (procCopy.length > 0) result.push(procCopy.shift());
+      if (procCopy.length > 0) result.push(procCopy.shift());
+      if (realCopy.length > 0) result.push(realCopy.shift());
+    }
+
+    return result;
+  }, [cloudVideos, proceduralVideos]);
+
+  // Фильтрация для текущей вкладки («Рекомендации» или «Подписки»)
+  const displayedFeedVideos = useMemo(() => {
+    if (feedTab === 'following' && userProfile) {
+      const followingSet = new Set(userProfile.followingIds || []);
+      return combinedAllVideos.filter(
+        (v) => followingSet.has(v.authorId) || v.authorId === userProfile.id
+      );
+    }
+    return combinedAllVideos;
+  }, [combinedAllVideos, feedTab, userProfile]);
+
+  // БЕСКОНЕЧНАЯ ДОГЕНЕРАЦИЯ НОВЫХ РОЛИКОВ ПРИ ПРИБЛИЖЕНИИ К КОНЦУ ЛЕНТЫ
+  useEffect(() => {
+    if (feedTab !== 'forYou') return;
+    if (displayedFeedVideos.length - activeVideoIndex <= 4) {
+      setProceduralVideos((prev) => [
+        ...prev,
+        ...generateProceduralBatch(prev.length, 8)
+      ]);
+    }
+  }, [activeVideoIndex, displayedFeedVideos.length, feedTab]);
+
+  // Отслеживание скролла ленты
+  const handleFeedScroll = () => {
+    const container = feedContainerRef.current;
+    if (!container) return;
+    const height = container.clientHeight;
+    if (height === 0) return;
+    const index = Math.round(container.scrollTop / height);
+    if (index !== activeVideoIndex && index >= 0 && index < displayedFeedVideos.length) {
+      setActiveVideoIndex(index);
+    }
+  };
+
+  const scrollToSlide = (direction) => {
+    const container = feedContainerRef.current;
+    if (!container) return;
+    const nextIndex = Math.max(
+      0,
+      Math.min(displayedFeedVideos.length - 1, activeVideoIndex + direction)
+    );
+    container.scrollTo({
+      top: nextIndex * container.clientHeight,
+      behavior: 'smooth'
+    });
+    setActiveVideoIndex(nextIndex);
+  };
+
+  const handleToggleMute = () => {
+    setIsMuted((prev) => {
+      const next = !prev;
+      audioEngine.setMuted(next);
+      const currentVid = displayedFeedVideos[activeVideoIndex];
+      if (!next && currentVid && !localVideoUrls[currentVid.id]) {
+        audioEngine.startBeat(currentVid.musicId || 'phonk');
+      }
+      showToast(next ? 'Звук выключен 🔇' : 'Звук включён 🔊');
+      return next;
+    });
+  };
+
+  // Лайк ролика (в Firestore для реальных роликов, в памяти для процедурных)
+  const handleToggleLike = async (video) => {
+    if (!fbUser) return;
+    const uid = fbUser.uid;
+    const isCurrentlyLiked = Array.isArray(video.likedBy) && video.likedBy.includes(uid);
+
+    if (video.isProcedural) {
+      setProceduralVideos((prev) =>
+        prev.map((v) => {
+          if (v.id !== video.id) return v;
+          const nextLikedBy = isCurrentlyLiked
+            ? (v.likedBy || []).filter((id) => id !== uid)
+            : [...(v.likedBy || []), uid];
+          return { ...v, likedBy: nextLikedBy };
+        })
+      );
+    } else {
+      const vidRef = doc(db, 'artifacts', appId, 'public', 'data', 'tiktak_videos', video.id);
+      try {
+        await updateDoc(vidRef, {
+          likedBy: isCurrentlyLiked ? arrayRemove(uid) : arrayUnion(uid)
+        });
+      } catch (err) {
+        console.error('Ошибка лайка:', err);
+      }
+    }
+  };
+
+  // Подписка / отписка с сохранением в облачный профиль
+  const handleToggleFollow = async (authorId, authorName) => {
+    if (!fbUser || !userProfile) return;
+    const isFollowing = (userProfile.followingIds || []).includes(authorId);
+    const myProfileRef = doc(db, 'artifacts', appId, 'public', 'data', 'tiktak_profiles', fbUser.uid);
+
+    try {
+      await updateDoc(myProfileRef, {
+        followingIds: isFollowing ? arrayRemove(authorId) : arrayUnion(authorId)
+      });
+      showToast(
+        isFollowing
+          ? `Вы отписались от ${authorName}`
+          : `Вы подписались на ${authorName} 🔥`
+      );
+    } catch (err) {
+      console.error('Ошибка подписки:', err);
+    }
+  };
+
+  // Добавление комментария в реальном времени
+  const handleAddComment = async (video, text) => {
+    if (!fbUser || !userProfile) return;
+    const newComment = {
+      id: 'c_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6),
+      authorId: fbUser.uid,
+      authorName: userProfile.name,
+      authorAvatar: userProfile.avatar,
+      text,
+      likes: 0,
+      likedBy: [],
+      time: 'Только что'
+    };
+
+    if (video.isProcedural) {
+      setProceduralVideos((prev) =>
+        prev.map((v) =>
+          v.id === video.id ? { ...v, comments: [newComment, ...(v.comments || [])] } : v
+        )
+      );
+    } else {
+      const vidRef = doc(db, 'artifacts', appId, 'public', 'data', 'tiktak_videos', video.id);
+      try {
+        await updateDoc(vidRef, {
+          comments: [newComment, ...(video.comments || [])]
+        });
+      } catch (err) {
+        console.error('Ошибка отправки комментария:', err);
+      }
+    }
+    showToast('Комментарий опубликован 💬');
+  };
+
+  // Лайк комментария
+  const handleToggleCommentLike = async (video, commentId) => {
+    if (!fbUser) return;
+    const uid = fbUser.uid;
+    const updatedComments = (video.comments || []).map((c) => {
+      if (c.id !== commentId) return c;
+      const liked = Array.isArray(c.likedBy) && c.likedBy.includes(uid);
+      const nextLikedBy = liked
+        ? c.likedBy.filter((id) => id !== uid)
+        : [...(c.likedBy || []), uid];
+      return { ...c, likedBy: nextLikedBy };
+    });
+
+    if (video.isProcedural) {
+      setProceduralVideos((prev) =>
+        prev.map((v) => (v.id === video.id ? { ...v, comments: updatedComments } : v))
+      );
+    } else {
+      const vidRef = doc(db, 'artifacts', appId, 'public', 'data', 'tiktak_videos', video.id);
+      try {
+        await updateDoc(vidRef, { comments: updatedComments });
+      } catch (err) {
+        console.error('Ошибка лайка комментария:', err);
+      }
+    }
+  };
+
+  // Поделиться роликом / ссылкой на приложение
+  const handleShare = async (video) => {
+    if (!video.isProcedural) {
+      const vidRef = doc(db, 'artifacts', appId, 'public', 'data', 'tiktak_videos', video.id);
+      updateDoc(vidRef, { sharesCount: (video.sharesCount || 0) + 1 }).catch(() => {});
+    }
+    const url = window.location.href;
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(url).catch(() => {});
+    }
+    showToast('Ссылка скопирована! Отправьте другу 🔗');
+  };
+
+  // Публикация нового ролика в общую облачную базу Firestore
+  const handlePublishVideo = async (newVideo, localPreviewUrl) => {
+    if (!fbUser) return;
+    if (localPreviewUrl) {
+      setLocalVideoUrls((prev) => ({ ...prev, [newVideo.id]: localPreviewUrl }));
+    }
+
+    const vidRef = doc(db, 'artifacts', appId, 'public', 'data', 'tiktak_videos', newVideo.id);
+    await setDoc(vidRef, newVideo);
+
+    setActiveNav('feed');
+    setFeedTab('forYou');
+    setActiveVideoIndex(0);
+    if (feedContainerRef.current) {
+      feedContainerRef.current.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+    showToast('Ролик опубликован в общий эфир! 🚀');
+  };
+
+  // Удаление собственного ролика из облака
+  const handleDeleteVideo = async (videoId) => {
+    await deleteLocalVideoBlob(videoId);
+    const vidRef = doc(db, 'artifacts', appId, 'public', 'data', 'tiktak_videos', videoId);
+    await deleteDoc(vidRef);
+    showToast('Ролик удалён из эфира 🗑️');
+  };
+
+  // Обновление профиля в Firestore
+  const handleUpdateUserProfile = async (updated) => {
+    if (!fbUser) return;
+    const myProfileRef = doc(db, 'artifacts', appId, 'public', 'data', 'tiktak_profiles', fbUser.uid);
+    await setDoc(myProfileRef, updated, { merge: true });
+    showToast('Профиль обновлён ✨');
+  };
+
+  // Переход к конкретному ролику из профиля или поиска
+  const handleOpenSpecificVideo = (videoId) => {
+    setActiveNav('feed');
+    setFeedTab('forYou');
+    setTimeout(() => {
+      const idx = combinedAllVideos.findIndex((v) => v.id === videoId);
+      const targetIdx = idx >= 0 ? idx : 0;
+      setActiveVideoIndex(targetIdx);
+      if (feedContainerRef.current) {
+        feedContainerRef.current.scrollTo({
+          top: targetIdx * feedContainerRef.current.clientHeight,
+          behavior: 'auto'
+        });
+      }
+    }, 60);
+  };
+
+  const activeCommentsVideo = useMemo(
+    () => combinedAllVideos.find((v) => v.id === activeCommentsVideoId) || null,
+    [combinedAllVideos, activeCommentsVideoId]
+  );
+
+  const myVideos = useMemo(
+    () => (userProfile ? cloudVideos.filter((v) => v.authorId === userProfile.id) : []),
+    [cloudVideos, userProfile]
+  );
+
+  const likedVideos = useMemo(
+    () =>
+      userProfile
+        ? combinedAllVideos.filter(
+            (v) => Array.isArray(v.likedBy) && v.likedBy.includes(userProfile.id)
+          )
+        : [],
+    [combinedAllVideos, userProfile]
+  );
+
+  // Экран загрузки при подключении к облаку
+  if (!userProfile) {
+    return (
+      <div className="min-h-screen w-full bg-[#09090b] text-white flex flex-col items-center justify-center gap-4">
+        <div className="w-16 h-16 rounded-2xl bg-gradient-to-tr from-[#25F4EE] via-white to-[#FE2C55] p-0.5 animate-spin">
+          <div className="w-full h-full rounded-2xl bg-black flex items-center justify-center text-2xl">
+            🎵
+          </div>
+        </div>
+        <p className="text-sm font-extrabold tracking-wide text-neutral-300">
+          Подключаемся к общему эфиру ТикТак...
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen w-full bg-[#09090b] text-white flex items-center justify-center sm:py-4 font-sans select-none">
+      <style>{`
+        .no-scrollbar::-webkit-scrollbar {
+          display: none;
+        }
+        .no-scrollbar {
+          -ms-overflow-style: none;
+          scrollbar-width: none;
+        }
+        @keyframes marquee {
+          0% { transform: translateX(15%); }
+          100% { transform: translateX(-100%); }
+        }
+        .animate-marquee {
+          animation: marquee 9s linear infinite;
+        }
+      `}</style>
+
+      {/* Десктопные стрелки прокрутки */}
+      {activeNav === 'feed' && displayedFeedVideos.length > 1 && (
+        <div className="hidden md:flex flex-col gap-3 mr-6">
+          <button
+            onClick={() => scrollToSlide(-1)}
+            disabled={activeVideoIndex === 0}
+            className="p-3.5 rounded-full bg-neutral-900 border border-white/10 text-white hover:bg-neutral-800 disabled:opacity-30 transition shadow-lg"
+            title="Предыдущий ролик"
+          >
+            <ChevronUp className="w-6 h-6" />
+          </button>
+          <button
+            onClick={() => scrollToSlide(1)}
+            className="p-3.5 rounded-full bg-neutral-900 border border-white/10 text-white hover:bg-neutral-800 transition shadow-lg"
+            title="Следующий ролик (Бесконечная лента)"
+          >
+            <ChevronDown className="w-6 h-6" />
+          </button>
+        </div>
+      )}
+
+      {/* ОСНОВНОЙ МОБИЛЬНЫЙ ЭКРАН ПРИЛОЖЕНИЯ */}
+      <div className="relative w-full max-w-md h-[100dvh] sm:h-[840px] sm:max-h-[92vh] bg-black sm:rounded-[2.2rem] sm:border-[3px] sm:border-neutral-800 shadow-[0_0_60px_rgba(254,44,85,0.2)] overflow-hidden flex flex-col">
+        {/* ТОСТ-УВЕДОМЛЕНИЕ */}
+        {toastMessage && (
+          <div className="absolute top-16 left-1/2 -translate-x-1/2 z-50 px-4 py-2 rounded-full bg-neutral-900/95 border border-[#25F4EE]/40 text-white text-xs font-bold shadow-2xl whitespace-nowrap animate-bounce">
+            {toastMessage}
+          </div>
+        )}
+
+        {/* 1. ГЛАВНАЯ ЛЕНТА (БЕСКОНЕЧНЫЕ РЕКОМЕНДАЦИИ И ПОДПИСКИ) */}
+        {activeNav === 'feed' && (
+          <div className="relative flex-1 w-full h-full overflow-hidden">
+            {/* Верхняя шапка */}
+            <div className="absolute top-0 inset-x-0 z-30 pt-4 pb-3 px-4 flex items-center justify-between bg-gradient-to-b from-black/80 to-transparent pointer-events-none">
+              <div className="flex items-center gap-1.5 pointer-events-auto">
+                <span className="font-black text-base tracking-tighter bg-gradient-to-r from-[#25F4EE] via-white to-[#FE2C55] bg-clip-text text-transparent">
+                  ТикТак
+                </span>
+              </div>
+
+              <div className="flex items-center gap-3.5 pointer-events-auto">
+                <button
+                  onClick={() => {
+                    setFeedTab('following');
+                    setActiveVideoIndex(0);
+                  }}
+                  className={`relative py-1 text-sm font-extrabold transition ${
+                    feedTab === 'following'
+                      ? 'text-white scale-105'
+                      : 'text-white/60 hover:text-white/90'
+                  }`}
+                >
+                  Подписки
+                  {feedTab === 'following' && (
+                    <span className="absolute bottom-0 left-1/2 -translate-x-1/2 w-6 h-0.5 rounded-full bg-white" />
+                  )}
+                </button>
+
+                <span className="text-white/25 text-xs">|</span>
+
+                <button
+                  onClick={() => {
+                    setFeedTab('forYou');
+                    setActiveVideoIndex(0);
+                  }}
+                  className={`relative py-1 text-sm font-extrabold transition ${
+                    feedTab === 'forYou'
+                      ? 'text-white scale-105'
+                      : 'text-white/60 hover:text-white/90'
+                  }`}
+                >
+                  Рекомендации
+                  {feedTab === 'forYou' && (
+                    <span className="absolute bottom-0 left-1/2 -translate-x-1/2 w-8 h-0.5 rounded-full bg-[#FE2C55]" />
+                  )}
+                </button>
+              </div>
+
+              {/* Индикатор онлайн-участников */}
+              <div
+                onClick={() => setActiveNav('inbox')}
+                className="pointer-events-auto flex items-center gap-1 px-2 py-0.5 rounded-full bg-black/50 backdrop-blur-md border border-emerald-500/40 text-[10px] font-bold text-emerald-300 cursor-pointer"
+                title="Участники в сети"
+              >
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping" />
+                {onlineProfilesCount}
+              </div>
+            </div>
+
+            {displayedFeedVideos.length === 0 ? (
+              <div className="h-full flex flex-col items-center justify-center px-8 text-center bg-neutral-950">
+                <div className="text-5xl mb-4">👀</div>
+                <h3 className="text-lg font-extrabold text-white mb-2">
+                  В подписках пока пусто
+                </h3>
+                <p className="text-xs text-neutral-400 mb-5">
+                  Подпишитесь на реальных авторов или креаторов в рекомендациях, чтобы следить за ними здесь!
+                </p>
+                <button
+                  onClick={() => setFeedTab('forYou')}
+                  className="px-5 py-2.5 rounded-full bg-[#FE2C55] text-white text-xs font-bold shadow-lg"
+                >
+                  В бесконечные рекомендации
+                </button>
+              </div>
+            ) : (
+              <div
+                ref={feedContainerRef}
+                onScroll={handleFeedScroll}
+                className="w-full h-full overflow-y-scroll snap-y snap-mandatory no-scrollbar"
+              >
+                {displayedFeedVideos.map((video, idx) => (
+                  <VideoCard
+                    key={video.id}
+                    video={video}
+                    isActive={idx === activeVideoIndex && activeNav === 'feed' && !isCreateOpen}
+                    isMuted={isMuted}
+                    onToggleMute={handleToggleMute}
+                    onToggleLike={handleToggleLike}
+                    onOpenComments={(id) => setActiveCommentsVideoId(id)}
+                    onShare={handleShare}
+                    onToggleFollow={handleToggleFollow}
+                    isFollowing={(userProfile.followingIds || []).includes(video.authorId)}
+                    currentUserId={userProfile.id}
+                    localVideoUrl={localVideoUrls[video.id]}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* 2. ПОИСК И ТРЕНДЫ */}
+        {activeNav === 'search' && (
+          <div className="flex-1 w-full h-full overflow-hidden">
+            <SearchTrendsView
+              allVideos={combinedAllVideos}
+              onSelectVideo={handleOpenSpecificVideo}
+              localVideoUrls={localVideoUrls}
+              onToggleFollow={handleToggleFollow}
+              user={userProfile}
+            />
+          </div>
+        )}
+
+        {/* 3. ВХОДЯЩИЕ УВЕДОМЛЕНИЯ */}
+        {activeNav === 'inbox' && (
+          <div className="flex-1 w-full h-full overflow-hidden">
+            <InboxActivityView
+              myVideos={myVideos}
+              onlineUsersCount={onlineProfilesCount}
+              onSelectVideo={handleOpenSpecificVideo}
+            />
+          </div>
+        )}
+
+        {/* 4. ПРОФИЛЬ ПОЛЬЗОВАТЕЛЯ */}
+        {activeNav === 'profile' && (
+          <div className="flex-1 w-full h-full overflow-hidden">
+            <ProfileView
+              user={userProfile}
+              onUpdateUser={handleUpdateUserProfile}
+              myVideos={myVideos}
+              likedVideos={likedVideos}
+              onSelectVideo={handleOpenSpecificVideo}
+              onDeleteVideo={handleDeleteVideo}
+              localVideoUrls={localVideoUrls}
+              onCopyInviteLink={() => {
+                if (navigator.clipboard && navigator.clipboard.writeText) {
+                  navigator.clipboard.writeText(window.location.href).catch(() => {});
+                }
+                showToast('Ссылка скопирована! Откройте её в другой вкладке или отправьте другу 🔗');
+              }}
+            />
+          </div>
+        )}
+
+        {/* НИЖНЯЯ НАВИГАЦИОННАЯ ПАНЕЛЬ (5 ПУНКТОВ В СТИЛЕ TIKTOK) */}
+        <div className="absolute bottom-0 inset-x-0 z-30 h-14 bg-black/95 backdrop-blur-md border-t border-white/10 px-3 flex items-center justify-around">
+          <button
+            onClick={() => setActiveNav('feed')}
+            className={`flex flex-col items-center gap-0.5 transition ${
+              activeNav === 'feed' ? 'text-white' : 'text-neutral-500 hover:text-neutral-300'
+            }`}
+          >
+            <Home className={`w-5 h-5 ${activeNav === 'feed' ? 'fill-white' : ''}`} />
+            <span className="text-[10px] font-bold">Главная</span>
+          </button>
+
+          <button
+            onClick={() => setActiveNav('search')}
+            className={`flex flex-col items-center gap-0.5 transition ${
+              activeNav === 'search' ? 'text-white' : 'text-neutral-500 hover:text-neutral-300'
+            }`}
+          >
+            <Search className="w-5 h-5" />
+            <span className="text-[10px] font-bold">Тренды</span>
+          </button>
+
+          {/* Кнопка создания ролика «+» */}
+          <button
+            onClick={() => setIsCreateOpen(true)}
+            className="relative group active:scale-90 transition-transform mx-1"
+            title="Выпустить ролик в общий эфир"
+          >
+            <div className="w-11 h-7 rounded-xl bg-gradient-to-r from-[#25F4EE] via-white to-[#FE2C55] p-[2px] shadow-lg shadow-[#FE2C55]/25">
+              <div className="w-full h-full rounded-[9px] bg-white flex items-center justify-center">
+                <Plus className="w-5 h-5 text-black stroke-[3]" />
+              </div>
+            </div>
+          </button>
+
+          <button
+            onClick={() => setActiveNav('inbox')}
+            className={`relative flex flex-col items-center gap-0.5 transition ${
+              activeNav === 'inbox' ? 'text-white' : 'text-neutral-500 hover:text-neutral-300'
+            }`}
+          >
+            <Bell className={`w-5 h-5 ${activeNav === 'inbox' ? 'fill-white' : ''}`} />
+            <span className="text-[10px] font-bold">Входящие</span>
+          </button>
+
+          <button
+            onClick={() => setActiveNav('profile')}
+            className={`flex flex-col items-center gap-0.5 transition ${
+              activeNav === 'profile' ? 'text-white' : 'text-neutral-500 hover:text-neutral-300'
+            }`}
+          >
+            <User className={`w-5 h-5 ${activeNav === 'profile' ? 'fill-white' : ''}`} />
+            <span className="text-[10px] font-bold">Профиль</span>
+          </button>
+        </div>
+      </div>
+
+      {/* СТУДИЯ ПУБЛИКАЦИИ РОЛИКА */}
+      <CreateStudioModal
+        isOpen={isCreateOpen}
+        onClose={() => setIsCreateOpen(false)}
+        onPublish={handlePublishVideo}
+        currentUser={userProfile}
+      />
+
+      {/* ШТОРКА КОММЕНТАРИЕВ */}
+      <CommentsDrawer
+        video={activeCommentsVideo}
+        onClose={() => setActiveCommentsVideoId(null)}
+        onAddComment={handleAddComment}
+        onToggleCommentLike={handleToggleCommentLike}
+        currentUser={userProfile}
+      />
+    </div>
+  );
+}
