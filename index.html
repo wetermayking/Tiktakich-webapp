@@ -462,7 +462,6 @@
       justify-content: center;
     }
 
-    /* Улучшенный дизайн студии и экранов */
     .page-scroll {
       flex: 1;
       overflow-y: auto;
@@ -670,6 +669,17 @@
       font-size: 13px;
       font-weight: 700;
       cursor: pointer;
+    }
+
+    .info-banner {
+      background: rgba(56, 189, 248, 0.1);
+      border: 1px solid rgba(56, 189, 248, 0.35);
+      border-radius: 12px;
+      padding: 10px 12px;
+      font-size: 12px;
+      color: #bae6fd;
+      margin-bottom: 12px;
+      line-height: 1.4;
     }
 
     .drawer-backdrop {
@@ -892,7 +902,6 @@
         <button class="secondary-btn" onclick="resetStudio()">Сбросить</button>
       </div>
 
-      <!-- Живой предпросмотр -->
       <div id="studio-preview" class="studio-preview">
         <video id="preview-video" style="display:none;" loop playsinline muted></video>
         <img id="preview-image" style="display:none;" alt="" />
@@ -903,7 +912,6 @@
         </div>
       </div>
 
-      <!-- Шаг 1: Медиа -->
       <div class="card-box">
         <div class="section-title">1. Видео и медиафайлы</div>
         <div class="file-drop-row">
@@ -922,6 +930,10 @@
           </label>
         </div>
 
+        <div class="info-banner">
+          💡 Чтобы видео видели <b>все друзья</b> на других телефонах, приложение загрузит его в облачное хранилище (или автоматически сожмёт короткий ролик в общую базу).
+        </div>
+
         <label style="font-size:12px; color:#a1a1aa;">Фон (если ролик без видео и фото)</label>
         <select id="post-theme" class="select-field" style="margin-bottom:0;" onchange="updateStudioPreview()">
           <option value="neon">Неоновый закат</option>
@@ -932,7 +944,6 @@
         </select>
       </div>
 
-      <!-- Шаг 2: Настройка звука и громкости -->
       <div class="card-box">
         <div class="section-title">2. Настройка звука и музыки</div>
 
@@ -970,7 +981,6 @@
         </div>
       </div>
 
-      <!-- Шаг 3: Текст и описание -->
       <div class="card-box">
         <div class="section-title">3. Оформление и описание</div>
         <div style="display:flex; gap:8px;">
@@ -980,7 +990,7 @@
         <textarea id="post-caption" class="textarea-field" rows="2" style="margin-bottom:0;" placeholder="Описание и хэштеги #тиктак #видео"></textarea>
       </div>
 
-      <button id="publish-btn" class="primary-btn" onclick="publishPost()">Опубликовать ролик 🚀</button>
+      <button id="publish-btn" class="primary-btn" onclick="publishPost()">Опубликовать для всех 🚀</button>
     </div>
   </div>
 
@@ -1054,6 +1064,7 @@
   import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
   import { getFirestore, collection, doc, setDoc, addDoc, updateDoc, deleteDoc, onSnapshot, query, orderBy, arrayUnion, increment } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
   import { getDatabase, ref as rtdbRef, set as rtdbSet, push as rtdbPush, remove as rtdbRemove, onValue as rtdbOnValue, update as rtdbUpdate } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
+  import { getStorage, ref as storageRef, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-storage.js";
 
   const firebaseConfig = {
     apiKey: "AIzaSyAbO_x3Fpj4wTcpgGZDNS22DHrGj6uOqa0",
@@ -1070,8 +1081,9 @@
   const auth = getAuth(app);
   const db = getFirestore(app);
   const rtdb = getDatabase(app);
+  const storage = getStorage(app);
 
-  // Локальная база IndexedDB для видео и музыки
+  // Локальный кэш на случай больших файлов без облачного Storage
   function openMediaDB() {
     return new Promise((resolve, reject) => {
       const req = indexedDB.open("tiktak_media_db", 1);
@@ -1130,7 +1142,116 @@
     }
   }
 
-  // Сохранение прогресса пользователя
+  // Загрузка файла в Firebase Storage для общего доступа всех друзей
+  async function uploadFileToFirebaseStorage(file, folder) {
+    try {
+      const ext = (file.name.split(".").pop() || "bin").toLowerCase();
+      const path = `${folder}/${Date.now()}_${Math.random().toString(36).slice(2, 8)}.${ext}`;
+      const fileRef = storageRef(storage, path);
+      await uploadBytes(fileRef, file);
+      return await getDownloadURL(fileRef);
+    } catch (e) {
+      console.warn("Firebase Storage недоступен, используем сжатие/встраивание:", e.message);
+      return "";
+    }
+  }
+
+  // Автоматическое пережатие видео в браузере, чтобы оно помещалось прямо в общую базу для всех друзей
+  function transcodeVideoToCompactDataUrl(file, maxSeconds = 12) {
+    return new Promise((resolve) => {
+      try {
+        const url = URL.createObjectURL(file);
+        const video = document.createElement("video");
+        video.src = url;
+        video.muted = false;
+        video.playsInline = true;
+
+        video.onloadedmetadata = () => {
+          if (typeof MediaRecorder === "undefined" || !video.captureStream) {
+            URL.revokeObjectURL(url);
+            resolve("");
+            return;
+          }
+
+          const targetW = Math.min(320, video.videoWidth || 320);
+          const ratio = (video.videoHeight || 568) / (video.videoWidth || 320);
+          const targetH = Math.round(targetW * ratio);
+
+          const canvas = document.createElement("canvas");
+          canvas.width = targetW;
+          canvas.height = targetH;
+          const ctx = canvas.getContext("2d");
+
+          const canvasStream = canvas.captureStream(16);
+          const videoStream = video.captureStream();
+          videoStream.getAudioTracks().forEach(track => canvasStream.addTrack(track));
+
+          const mimeType = MediaRecorder.isTypeSupported("video/webm;codecs=vp8,opus")
+            ? "video/webm;codecs=vp8,opus"
+            : "video/webm";
+
+          const recorder = new MediaRecorder(canvasStream, {
+            mimeType,
+            videoBitsPerSecond: 240000,
+            audioBitsPerSecond: 48000
+          });
+
+          const chunks = [];
+          recorder.ondataavailable = (e) => {
+            if (e.data && e.data.size > 0) chunks.push(e.data);
+          };
+
+          recorder.onstop = () => {
+            URL.revokeObjectURL(url);
+            const blob = new Blob(chunks, { type: mimeType });
+            if (blob.size > 850 * 1024) {
+              resolve("");
+              return;
+            }
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result);
+            reader.onerror = () => resolve("");
+            reader.readAsDataURL(blob);
+          };
+
+          let stopped = false;
+          const finish = () => {
+            if (stopped) return;
+            stopped = true;
+            video.pause();
+            if (recorder.state !== "inactive") recorder.stop();
+          };
+
+          const drawFrame = () => {
+            if (stopped) return;
+            ctx.drawImage(video, 0, 0, targetW, targetH);
+            if (video.ended || video.currentTime >= maxSeconds) {
+              finish();
+            } else {
+              requestAnimationFrame(drawFrame);
+            }
+          };
+
+          recorder.start(250);
+          video.play().then(() => {
+            drawFrame();
+            setTimeout(finish, (maxSeconds + 1) * 1000);
+          }).catch(() => {
+            URL.revokeObjectURL(url);
+            resolve("");
+          });
+        };
+
+        video.onerror = () => {
+          URL.revokeObjectURL(url);
+          resolve("");
+        };
+      } catch (_) {
+        resolve("");
+      }
+    });
+  }
+
   let localProfile = JSON.parse(localStorage.getItem("tiktak_user") || "null") || {
     uid: "local_" + Math.random().toString(36).slice(2, 9),
     name: "Автор_" + Math.floor(100 + Math.random() * 900),
@@ -1153,7 +1274,7 @@
   let currentVisiblePostId = null;
   let isCurrentVideoPaused = false;
   let tapTimeout = null;
-  let studioSoundMode = "original"; // original | music | muted
+  let studioSoundMode = "original";
 
   const THEMES = {
     neon: ["#ff007f", "#7928ca", "#00d4ff"],
@@ -1177,7 +1298,7 @@
     el.textContent = msg;
     el.style.display = "block";
     clearTimeout(window._toastTimer);
-    window._toastTimer = setTimeout(() => { el.style.display = "none"; }, 2500);
+    window._toastTimer = setTimeout(() => { el.style.display = "none"; }, 2800);
   }
 
   function setCloudStatus(mode, text) {
@@ -1188,7 +1309,6 @@
     label.textContent = text;
   }
 
-  // Настройки студии ролика
   window.setStudioSoundMode = function(mode) {
     studioSoundMode = mode;
     document.getElementById("smode-original").classList.toggle("active", mode === "original");
@@ -1278,7 +1398,6 @@
     onStudioMediaChange();
   };
 
-  // Управление звуком и паузой в ленте
   window.toggleGlobalSound = function() {
     globalSoundEnabled = !globalSoundEnabled;
     const btn = document.getElementById("global-sound-btn");
@@ -1313,7 +1432,7 @@
     const videoVol = typeof post.videoVolume === "number" ? post.videoVolume / 100 : 1;
     const musicVol = typeof post.musicVolume === "number" ? post.musicVolume / 100 : 0.6;
 
-    let audioSrc = post.audioData || "";
+    let audioSrc = post.audioUrl || post.audioData || "";
     if (!audioSrc && post.localAudioKey) {
       audioSrc = await getLocalMediaUrl(post.localAudioKey);
     }
@@ -1399,10 +1518,14 @@
 
   async function hydrateLocalMediaUrls(posts) {
     for (const p of posts) {
-      if (!p.videoData && p.localVideoKey) {
+      if (p.videoUrl) {
+        p._resolvedVideoUrl = p.videoUrl;
+      } else if (p.videoData) {
+        p._resolvedVideoUrl = p.videoData;
+      } else if (p.localVideoKey) {
         p._resolvedVideoUrl = await getLocalMediaUrl(p.localVideoKey);
       } else {
-        p._resolvedVideoUrl = p.videoData || "";
+        p._resolvedVideoUrl = "";
       }
     }
     return posts;
@@ -1506,9 +1629,9 @@
       const isSub = localProfile.following.includes(post.authorId);
       const isMine = post.authorId === localProfile.uid;
       const commentsCount = Array.isArray(post.comments) ? post.comments.length : 0;
-      const videoSrc = post._resolvedVideoUrl || post.videoData || "";
+      const videoSrc = post._resolvedVideoUrl || post.videoUrl || post.videoData || "";
       const soundMode = post.soundMode || "original";
-      const hasCustomAudio = Boolean(post.audioData || post.localAudioKey);
+      const hasCustomAudio = Boolean(post.audioUrl || post.audioData || post.localAudioKey);
 
       let audioPillText = "";
       if (soundMode === "muted") {
@@ -1627,7 +1750,6 @@
     if (name === "discover") renderDiscover();
   };
 
-  // Удаление своего ролика
   window.deletePost = async function(postId) {
     if (!confirm("Удалить этот ролик для всех?")) return;
     const target = realPosts.find(p => p.id === postId);
@@ -1811,31 +1933,45 @@
     }
 
     btn.disabled = true;
-    btn.textContent = "Публикуем...";
+    btn.textContent = "Загружаем в облако для всех...";
 
     let imageData = "";
     if (imageFile) {
       imageData = await compressImage(imageFile);
     }
 
+    let videoUrl = "";
     let videoData = "";
     let localVideoKey = "";
     if (videoFile) {
       const mediaId = "vid_" + Date.now() + "_" + Math.random().toString(36).slice(2, 7);
       await saveLocalMedia(mediaId, videoFile);
       localVideoKey = mediaId;
-      if (videoFile.size <= 550 * 1024) {
-        videoData = await fileToDataUrl(videoFile);
+
+      // 1. Пробуем загрузить видео в Firebase Storage, чтобы все видели оригинал
+      videoUrl = await uploadFileToFirebaseStorage(videoFile, "videos");
+
+      // 2. Если Storage недоступен — сжимаем видео или кодируем в base64 для общей базы
+      if (!videoUrl) {
+        if (videoFile.size <= 750 * 1024) {
+          videoData = await fileToDataUrl(videoFile);
+        } else {
+          btn.textContent = "Сжимаем видео для общей ленты...";
+          videoData = await transcodeVideoToCompactDataUrl(videoFile, 10);
+        }
       }
     }
 
+    let audioUrl = "";
     let audioData = "";
     let localAudioKey = "";
     if (audioFile) {
       const audioId = "aud_" + Date.now() + "_" + Math.random().toString(36).slice(2, 7);
       await saveLocalMedia(audioId, audioFile);
       localAudioKey = audioId;
-      if (audioFile.size <= 450 * 1024) {
+
+      audioUrl = await uploadFileToFirebaseStorage(audioFile, "audios");
+      if (!audioUrl && audioFile.size <= 550 * 1024) {
         audioData = await fileToDataUrl(audioFile);
       }
     }
@@ -1855,8 +1991,10 @@
       videoVolume,
       musicVolume,
       imageData,
+      videoUrl,
       videoData,
       localVideoKey,
+      audioUrl,
       audioData,
       localAudioKey,
       likes: 0,
@@ -1866,23 +2004,27 @@
 
     try {
       await addDoc(collection(db, "tiktak_posts"), postPayload);
-      showToast("Ролик опубликован в общую ленту! 🚀");
+      if (videoFile && !videoUrl && !videoData) {
+        showToast("Видео слишком тяжёлое — включи Storage в Firebase!");
+      } else {
+        showToast("Ролик опубликован для всех! 🚀");
+      }
     } catch (e) {
       try {
         const newRef = rtdbPush(rtdbRef(rtdb, "tiktak_posts"));
         await rtdbSet(newRef, postPayload);
-        showToast("Ролик опубликован! 🚀");
+        showToast("Ролик опубликован для всех! 🚀");
       } catch (err) {
         const localItem = { id: "local_" + Date.now(), isReal: true, ...postPayload };
-        localItem._resolvedVideoUrl = localVideoKey ? await getLocalMediaUrl(localVideoKey) : videoData;
+        localItem._resolvedVideoUrl = videoUrl || videoData || (localVideoKey ? await getLocalMediaUrl(localVideoKey) : "");
         realPosts.unshift(localItem);
         renderFeed();
-        showToast("Сохранено на устройстве");
+        showToast("Сохранено локально");
       }
     }
 
     btn.disabled = false;
-    btn.textContent = "Опубликовать ролик 🚀";
+    btn.textContent = "Опубликовать для всех 🚀";
     resetStudio();
     switchScreen("feed");
     document.getElementById("feed-container").scrollTo({ top: 0, behavior: "smooth" });
@@ -1944,7 +2086,7 @@
 
     document.getElementById("discover-grid").innerHTML = filtered.slice(0, 18).map(p => {
       const colors = THEMES[p.theme] || THEMES.neon;
-      const vSrc = p._resolvedVideoUrl || p.videoData || "";
+      const vSrc = p._resolvedVideoUrl || p.videoUrl || p.videoData || "";
       return `
         <div class="grid-item" style="background:linear-gradient(135deg, ${colors[0]}, ${colors[1]});" onclick="switchScreen('feed')">
           ${vSrc ? `<video src="${vSrc}" muted playsinline></video>` : (p.imageData ? `<img src="${p.imageData}" />` : "")}
@@ -2002,7 +2144,7 @@
       ? `<div style="grid-column:1/-1; text-align:center; color:#71717a; padding:20px;">Пока нет роликов</div>`
       : userPosts.map(p => {
           const colors = THEMES[p.theme] || THEMES.neon;
-          const vSrc = p._resolvedVideoUrl || p.videoData || "";
+          const vSrc = p._resolvedVideoUrl || p.videoUrl || p.videoData || "";
           return `
             <div class="grid-item" style="background:linear-gradient(135deg, ${colors[0]}, ${colors[1]});" onclick="switchScreen('feed')">
               ${isMe ? `<button class="grid-delete-btn" onclick="event.stopPropagation(); deletePost('${p.id}')">✕</button>` : ""}
